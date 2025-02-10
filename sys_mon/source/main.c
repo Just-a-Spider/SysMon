@@ -76,58 +76,62 @@ Result http_fetch(const char *url) {
     }
 
     buf[contentsize] = '\0'; // Null-terminate the buffer
-
+    
     // Segmentate the buf response (JSON) for readable data
     int cpu_fan = 0;
     int gpu_fan = 0;
-    float edge_temp = 0.0;
-    float tctl_temp = 0.0;
+    float gpu_temp = 0.0;
+    float cpu_temp = 0.0;
     float free_ram = 0.0;
     float cpu_usage = 0.0;
-
+    
     char *cpu_fan_str = strstr((char *)buf, "\"cpu_fan\":");
     if (cpu_fan_str) {
         sscanf(cpu_fan_str, "\"cpu_fan\":%d", &cpu_fan);
     }
-
+    
     char *gpu_fan_str = strstr((char *)buf, "\"gpu_fan\":");
     if (gpu_fan_str) {
         sscanf(gpu_fan_str, "\"gpu_fan\":%d", &gpu_fan);
     }
-
-    char *edge_str = strstr((char *)buf, "\"edge\":");
-    if (edge_str) {
-        sscanf(edge_str, "\"edge\":%f", &edge_temp);
+    
+    // Use the correct key "gpu_temp" now
+    char *gpu_temp_str = strstr((char *)buf, "\"gpu_temp\":");
+    if (gpu_temp_str) {
+        sscanf(gpu_temp_str, "\"gpu_temp\":%f", &gpu_temp);
     }
-
-    char *tctl_str = strstr((char *)buf, "\"tctl\":");
-    if (tctl_str) {
-        sscanf(tctl_str, "\"tctl\":%f", &tctl_temp);
+    
+    char *cpu_temp_str = strstr((char *)buf, "\"cpu_temp\":");
+    if (cpu_temp_str) {
+        sscanf(cpu_temp_str, "\"cpu_temp\":%f", &cpu_temp);
     }
-
+    
     char *free_ram_str = strstr((char *)buf, "\"free_ram\":");
     if (free_ram_str) {
         sscanf(free_ram_str, "\"free_ram\":%f", &free_ram);
     }
-
+    
+    // Parse cpu_usage as a quoted string
     char *cpu_usage_str = strstr((char *)buf, "\"cpu_usage\":");
     if (cpu_usage_str) {
-        sscanf(cpu_usage_str, "\"cpu_usage\":%f", &cpu_usage);
+        char cpu_usage_val[10];
+        sscanf(cpu_usage_str, "\"cpu_usage\":\"%[^\"]\"", cpu_usage_val);
+        cpu_usage = strtof(cpu_usage_val, NULL);
     }
-
+    
     // Print the response data
     printf("\x1b[1;0HSystem Data:");
     printf("\x1b[2;0HRAM Available: %.2f GB", free_ram);
     printf("\x1b[3;0HCPU Usage: %.2f%%", cpu_usage);
-    printf("\x1b[4;0HCPU Temps: %.1f C", tctl_temp);
-    printf("\x1b[5;0HGPU Temps: %.1f C", edge_temp);
+    printf("\x1b[4;0HCPU Temps: %.1f C", cpu_temp);
+    printf("\x1b[5;0HGPU Temps: %.1f C", gpu_temp);
     printf("\x1b[6;0HCPU Fan: %d RPM", cpu_fan);
     printf("\x1b[7;0HGPU Fan: %d RPM", gpu_fan);
-
+    
     // Clean up
     free(buf);
     httpcCloseContext(&context);
-
+    
     return 0;
 }
 
