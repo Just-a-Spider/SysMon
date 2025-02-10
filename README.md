@@ -3,6 +3,7 @@
 cd client/
 docker compose up -d
 ```
+The web can be seen in your host's 4201 port in your LAN
 
 # Build the 3DS application
 ```bash
