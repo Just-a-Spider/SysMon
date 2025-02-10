@@ -1,0 +1,11 @@
+/* You can add global styles to this file, and also import other style files */
+@import "../node_modules/primeflex/primeflex.css";
+
+@font-face {
+  font-family: "Monocraft";
+  src: url("/public/Monocraft.ttf") format("truetype");
+}
+
+* {
+  font-family: "Monocraft", sans-serif;
+}

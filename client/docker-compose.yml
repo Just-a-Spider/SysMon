@@ -1,0 +1,9 @@
+services:
+  sysmon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sysmon
+    restart: unless-stopped
+    ports:
+      - 4201:3000

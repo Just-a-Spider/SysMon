@@ -1,0 +1,62 @@
+<router-outlet />
+<!-- <p-inputnumber [(ngModel)]="delay" [showButtons]="true"></p-inputnumber> -->
+<div
+  class="flex flex-column gap-4 p-4 justify-content-start align-items-center h-screen w-screen text-center"
+>
+  <div class="flex flex-row gap-4">
+    <p-card header="CPU Usage">
+      <p-knob
+        [(ngModel)]="sysData.cpu_usage"
+        [min]="0.0"
+        [max]="100.0"
+        [readonly]="true"
+        [showValue]="true"
+        [valueColor]="sysData.edge >= 80.0 ? 'red' : 'darkgreen'"
+        [size]="90"
+      ></p-knob>
+    </p-card>
+    <p-card header="RAM Available">
+      <p-knob
+        [(ngModel)]="sysData.free_ram"
+        [min]="0"
+        [max]="16.0"
+        [readonly]="true"
+        [showValue]="true"
+        [valueColor]="sysData.edge <= 4.0 ? 'red' : 'orange'"
+        [size]="90"
+      ></p-knob>
+    </p-card>
+  </div>
+  <div class="flex flex-row gap-4">
+    <p-card header="CPU Temp">
+      <p-knob
+        [(ngModel)]="sysData.tctl"
+        [min]="0"
+        [max]="110"
+        [readonly]="true"
+        [showValue]="true"
+        [valueColor]="sysData.tctl > 85 ? 'red' : 'darkblue'"
+        [size]="90"
+      ></p-knob
+    ></p-card>
+    <p-card header="GPU Temp">
+      <p-knob
+        [(ngModel)]="sysData.edge"
+        [min]="0"
+        [max]="95"
+        [readonly]="true"
+        [showValue]="true"
+        [valueColor]="sysData.edge > 75 ? 'red' : 'purple'"
+        [size]="90"
+      ></p-knob>
+    </p-card>
+  </div>
+  <div class="flex flex-row gap-4">
+    <p-card header="CPU Fan">
+      <p>{{ sysData.cpu_fan }} RPM</p>
+    </p-card>
+    <p-card header="GPU Fan">
+      <p>{{ sysData.gpu_fan }} RPM</p>
+    </p-card>
+  </div>
+</div>
