@@ -7,3 +7,14 @@ services:
     restart: unless-stopped
     ports:
       - 4201:3000
+    devices:
+      - "/dev/dri:/dev/dri"
+    privileged: true
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

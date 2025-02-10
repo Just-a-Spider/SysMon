@@ -53,6 +53,11 @@ async function getFansSpeed() {
               name: "gpu_fan",
               value: parseInt(line.split(":")[1].trim(), 10),
             };
+          } else if (line.includes("edge")) {
+            return {
+              name: "gpu_temp",
+              value: parseFloat(line.split(":")[1].trim()),
+            };
           }
         })
         .filter((line) => line !== undefined); // Filter out undefined values
@@ -76,8 +81,8 @@ async function parseSystemData() {
     .then((data) => data.currentLoad.toFixed(2));
 
   // GPU data
-  const graphicsData = await si.graphics();
-  const gpuTemp = graphicsData.controllers[0].temperatureGpu;
+  // const graphicsData = await si.graphics();
+  // const gpuTemp = graphicsData.controllers[0].temperatureGpu;
 
   // RAM data
   const freeRam = await si
@@ -91,7 +96,7 @@ async function parseSystemData() {
     cpu_fan: fansData.cpu_fan,
     gpu_fan: fansData.gpu_fan,
     cpu_temp: cpuTemp,
-    gpu_temp: gpuTemp,
+    gpu_temp: fansData.gpu_temp,
     free_ram: freeRam,
     cpu_usage: cpuUsage,
   };
