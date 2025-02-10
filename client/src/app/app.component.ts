@@ -33,6 +33,7 @@ export class AppComponent implements OnInit {
     this.dataService.getSysData().subscribe((data: SysData) => {
       this.sysData = data;
       this.sysData.free_ram.toFixed(2);
+      console.log(this.sysData);
     });
   }
 }

@@ -7,7 +7,7 @@ import { SysData } from '../classes/sys-data.class';
   providedIn: 'root',
 })
 export class SysDataService {
-  private apiUrl = '/api/data';
+  private apiUrl = 'http://localhost:3000/api/data';
 
   constructor(private http: HttpClient) {}
 

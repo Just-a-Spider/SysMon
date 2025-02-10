@@ -25,7 +25,7 @@
     "primeicons": "^7.0.0",
     "primeng": "^19.0.5",
     "rxjs": "~7.8.0",
-    "system-health-monitor": "^1.2.1",
+    "systeminformation": "^5.25.11",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.0"
   },

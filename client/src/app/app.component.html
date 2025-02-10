@@ -11,7 +11,7 @@
         [max]="100.0"
         [readonly]="true"
         [showValue]="true"
-        [valueColor]="sysData.edge >= 80.0 ? 'red' : 'darkgreen'"
+        [valueColor]="sysData.cpu_usage >= 80.0 ? 'red' : 'darkgreen'"
         [size]="90"
       ></p-knob>
     </p-card>
@@ -22,7 +22,7 @@
         [max]="16.0"
         [readonly]="true"
         [showValue]="true"
-        [valueColor]="sysData.edge <= 4.0 ? 'red' : 'orange'"
+        [valueColor]="sysData.free_ram <= 4.0 ? 'red' : 'orange'"
         [size]="90"
       ></p-knob>
     </p-card>
@@ -30,23 +30,23 @@
   <div class="flex flex-row gap-4">
     <p-card header="CPU Temp">
       <p-knob
-        [(ngModel)]="sysData.tctl"
+        [(ngModel)]="sysData.cpu_temp"
         [min]="0"
         [max]="110"
         [readonly]="true"
         [showValue]="true"
-        [valueColor]="sysData.tctl > 85 ? 'red' : 'darkblue'"
+        [valueColor]="sysData.cpu_temp > 85 ? 'red' : 'darkblue'"
         [size]="90"
       ></p-knob
     ></p-card>
     <p-card header="GPU Temp">
       <p-knob
-        [(ngModel)]="sysData.edge"
+        [(ngModel)]="sysData.gpu_temp"
         [min]="0"
         [max]="95"
         [readonly]="true"
         [showValue]="true"
-        [valueColor]="sysData.edge > 75 ? 'red' : 'purple'"
+        [valueColor]="sysData.gpu_temp > 75 ? 'red' : 'purple'"
         [size]="90"
       ></p-knob>
     </p-card>
