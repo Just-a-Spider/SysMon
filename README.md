@@ -1,4 +1,4 @@
-# Run the application
+# Run the Angular app & Server
 ```bash
 cd client/
 docker compose up -d
