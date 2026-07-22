@@ -1,0 +1,36 @@
+BasicInfo:
+  Title                   : "SysMon"
+  CompanyCode             : "00"
+  ProductCode             : "SYSMON"
+  ContentType             : Application
+  Logo                    : Nintendo
+
+TitleInfo:
+  UniqueId                : 0x01337
+  Category                : Application
+
+Option:
+  UseOnSD                 : true
+  FreeProductCode         : true
+
+AccessControlInfo:
+  CoreVersion             : 2
+  IdealProcessor          : 0
+  AffinityMask            : 1
+  Priority                : 16
+  MemoryType              : Application
+  SystemMode              : 64MB
+  SystemModeExt           : 124MB
+
+SystemControlInfo:
+  SaveDataSize            : 0KB
+  RemasterVersion         : 0
+  StackSize               : 0x40000
+  AppType                 : RegularApplication
+  Dependency:
+    ac:u:                 0x0004013000002402
+    fs:USER:              0x0004013000001302
+    gsp::Gpu:             0x0004013000001c02
+    hid:USER:             0x0004013000001d02
+    http:C:               0x0004013000002902
+    soc:U:                0x0004013000002e02

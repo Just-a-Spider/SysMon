@@ -1,0 +1,18 @@
+[
+  {
+    "button": "A",
+    "type": "cmd",
+    "label": "Mute Audio",
+    "value": "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle",
+    "color": "",
+    "icon": ""
+  },
+  {
+    "button": "R",
+    "type": "cmd",
+    "label": "Open Terminal",
+    "value": "cosmic-term",
+    "color": "",
+    "icon": ""
+  }
+]

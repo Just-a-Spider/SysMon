@@ -1,0 +1,27 @@
+[package]
+name = "sysmon-server"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "SysMon Server for Nintendo 3DS Companion"
+[dependencies]
+axum = "0.8.9"
+open = "5.3"
+tao = "0.24"
+enigo = { version = "0.6.1", features = ["wayland"] }
+gtk = "0.18"
+image = "0.25.10"
+mpris = "2.1.0"
+muda = "0.19.3"
+reqwest = "0.13.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sysinfo = "0.38.4"
+tokio = { version = "1.53.1", features = ["full"] }
+tray-icon = "0.24.1"
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/sysmon-server", dest = "/usr/bin/sysmon-server", mode = "755" },
+    { source = "packaging/sysmon-server.desktop", dest = "/usr/share/applications/sysmon-server.desktop", mode = "644" },
+    { source = "../sysmon-3ds/icon.png", dest = "/usr/share/icons/hicolor/512x512/apps/sysmon-server.png", mode = "644" }
+]

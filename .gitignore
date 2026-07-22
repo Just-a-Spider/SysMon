@@ -1,2 +1,23 @@
-/.vscode
-DEV_NOTES.md
+# IDE
+.vscode/
+
+# 3DS Build Artifacts
+sysmon-3ds/build/
+sysmon-3ds/*.elf
+sysmon-3ds/*.3dsx
+sysmon-3ds/*.cia
+sysmon-3ds/*.smdh
+sysmon-3ds/*.map
+
+# Rust Server
+sysmon-server/target/
+sysmon-server/rpmbuild/
+sysmon-server/Cargo.lock
+
+# Angular Web Config
+sysmon-web/node_modules/
+sysmon-web/dist/
+sysmon-web/.angular/
+
+# Other
+assets/avatar.png

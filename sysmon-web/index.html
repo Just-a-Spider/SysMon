@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SysMon Telemetry</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --panel-bg: #1e1e1e;
+            --text-color: #ffffff;
+            --danger-color: #f44336;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1, h2 {
+            font-weight: 400;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SysMon Dashboard</h1>
+
+        <div class="panel" id="telemetry-panel">
+            <h2>Live Telemetry</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 1.2em; margin-top: 20px;">
+                <div>
+                    <span style="color: #bbb;">CPU Usage:</span> <span id="tel-cpu">--</span>%<br>
+                    <span style="color: #bbb;">CPU Temp:</span> <span id="tel-cputemp">--</span>°C
+                </div>
+                <div>
+                    <span style="color: #bbb;">GPU Temp:</span> <span id="tel-gputemp">--</span>°C<br>
+                    <span style="color: #bbb;">Free RAM:</span> <span id="tel-ram">--</span> GB
+                </div>
+            </div>
+            <div style="margin-top: 20px; font-size: 1.2em; text-align: center;">
+                <span style="color: #bbb;">Heavy Process:</span> <br>
+                <span id="tel-proc" style="color: var(--danger-color); font-weight: bold;">--</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/telemetry');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data) {
+                        document.getElementById('tel-cpu').innerText = data.cpu_usage;
+                        document.getElementById('tel-cputemp').innerText = data.cpu_temp;
+                        document.getElementById('tel-gputemp').innerText = data.gpu_temp;
+                        document.getElementById('tel-ram').innerText = data.free_ram.toFixed(1);
+                        if (data.top_procs && data.top_procs.length > 0) {
+                            document.getElementById('tel-proc').innerText = `${data.top_procs[0].name} (${data.top_procs[0].cpu_percent.toFixed(1)}%)`;
+                        }
+                    }
+                }
+            } catch (e) {}
+        }, 1500);
+    </script>
+</body>
+</html>

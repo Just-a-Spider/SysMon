@@ -1,0 +1,5 @@
+{
+  "pin": "1234",
+  "port": 4201,
+  "update_interval_ms": 3000
+}

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SysMon Configuration</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --panel-bg: #1e1e1e;
+            --text-color: #ffffff;
+            --accent-color: #4CAF50;
+            --danger-color: #f44336;
+            --border-color: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1, h2 {
+            font-weight: 400;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #bbb;
+            font-size: 0.9em;
+        }
+
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            background-color: #2a2a2a;
+            border: 1px solid var(--border-color);
+            color: white;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .btn-danger {
+            background-color: var(--danger-color);
+        }
+        
+        .btn-danger:hover {
+            background-color: #da190b;
+        }
+
+        .macro-row {
+            display: grid;
+            grid-template-columns: 80px 100px 1fr 1fr 60px;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #2a2a2a;
+            border-radius: 4px;
+        }
+
+        .macro-row input, .macro-row select {
+            width: 100%;
+            padding: 8px;
+            background-color: #1e1e1e;
+            border: 1px solid var(--border-color);
+            color: white;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .macro-header {
+            display: grid;
+            grid-template-columns: 80px 100px 1fr 1fr 60px;
+            gap: 10px;
+            margin-bottom: 5px;
+            padding: 0 10px;
+            color: #bbb;
+            font-size: 0.9em;
+        }
+
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SysMon Dashboard</h1>
+
+        <div class="panel" id="telemetry-panel">
+            <h2>Live Telemetry</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 1.1em;">
+                <div>
+                    <span style="color: #bbb;">CPU Usage:</span> <span id="tel-cpu">--</span>%<br>
+                    <span style="color: #bbb;">CPU Temp:</span> <span id="tel-cputemp">--</span>°C
+                </div>
+                <div>
+                    <span style="color: #bbb;">GPU Temp:</span> <span id="tel-gputemp">--</span>°C<br>
+                    <span style="color: #bbb;">Free RAM:</span> <span id="tel-ram">--</span> GB
+                </div>
+            </div>
+            <div style="margin-top: 15px; font-size: 1.1em;">
+                <span style="color: #bbb;">Heavy Process:</span> <span id="tel-proc" style="color: var(--danger-color);">--</span>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>General Settings</h2>
+            <div class="form-group">
+                <label>Auth PIN</label>
+                <input type="text" id="config-pin">
+            </div>
+            <div class="form-group">
+                <label>Server TCP Port (3DS Connection)</label>
+                <input type="number" id="config-port">
+            </div>
+            <div class="form-group">
+                <label>Web Dashboard Port</label>
+                <input type="number" id="config-web-port">
+            </div>
+            <div class="form-group">
+                <label>Update Interval (ms)</label>
+                <input type="number" id="config-interval">
+            </div>
+            <button onclick="saveConfig()">Save Settings</button>
+        </div>
+
+        <div class="panel">
+            <div class="flex-between">
+                <h2>Macros</h2>
+                <button onclick="addMacro()">+ Add Macro</button>
+            </div>
+            
+            <div class="macro-header">
+                <div>Button</div>
+                <div>Type</div>
+                <div>Label</div>
+                <div>Value (Command/Key)</div>
+                <div></div>
+            </div>
+            
+            <div id="macros-list">
+                <!-- Macros will be injected here -->
+            </div>
+            
+            <button onclick="saveMacros()" style="margin-top: 15px;">Save Macros</button>
+        </div>
+    </div>
+
+    <script>
+        let macros = [];
+
+        async function loadData() {
+            try {
+                const cfgRes = await fetch('/api/config');
+                const cfg = await cfgRes.json();
+                document.getElementById('config-pin').value = cfg.pin;
+                document.getElementById('config-port').value = cfg.port;
+                document.getElementById('config-web-port').value = cfg.web_port;
+                document.getElementById('config-interval').value = cfg.update_interval_ms;
+
+                const macRes = await fetch('/api/macros');
+                macros = await macRes.json();
+                renderMacros();
+            } catch (e) {
+                console.error("Failed to load data", e);
+                alert("Failed to connect to SysMon server.");
+            }
+        }
+
+        function renderMacros() {
+            const list = document.getElementById('macros-list');
+            list.innerHTML = '';
+            
+            macros.forEach((m, index) => {
+                const row = document.createElement('div');
+                row.className = 'macro-row';
+                
+                row.innerHTML = `
+                    <input type="text" value="${m.button || ''}" onchange="updateMacro(${index}, 'button', this.value)" placeholder="A, B, T1...">
+                    <select onchange="updateMacro(${index}, 'type', this.value)">
+                        <option value="cmd" ${m.type === 'cmd' ? 'selected' : ''}>Command</option>
+                        <option value="keys" ${m.type === 'keys' ? 'selected' : ''}>Keys</option>
+                        <option value="open" ${m.type === 'open' ? 'selected' : ''}>Open (File/URL)</option>
+                    </select>
+                    <input type="text" value="${m.label || ''}" onchange="updateMacro(${index}, 'label', this.value)" placeholder="Label (e.g. Mute)">
+                    <input type="text" value="${m.value || ''}" onchange="updateMacro(${index}, 'value', this.value)" 
+                           placeholder="${m.type === 'keys' ? 'ctrl+super+q' : (m.type === 'open' ? 'https://youtube.com' : 'wpctl set-mute...')}">
+                    <button class="btn-danger" onclick="removeMacro(${index})">X</button>
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        function updateMacro(index, field, value) {
+            macros[index][field] = value;
+            if (field === 'type') renderMacros();
+        }
+
+        function addMacro() {
+            macros.push({ button: "T" + (macros.length + 1), type: "cmd", label: "New Macro", value: "", color: "", icon: "" });
+            renderMacros();
+        }
+
+        function removeMacro(index) {
+            macros.splice(index, 1);
+            renderMacros();
+        }
+
+        async function saveConfig() {
+            const cfg = {
+                pin: document.getElementById('config-pin').value,
+                port: parseInt(document.getElementById('config-port').value),
+                web_port: parseInt(document.getElementById('config-web-port').value),
+                update_interval_ms: parseInt(document.getElementById('config-interval').value)
+            };
+
+            await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cfg)
+            });
+            alert("Settings saved! Server will restart to apply port changes.");
+        }
+
+        async function saveMacros() {
+            await fetch('/api/macros', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(macros)
+            });
+            alert("Macros saved instantly.");
+        }
+
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/telemetry');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data) {
+                        document.getElementById('tel-cpu').innerText = data.cpu_usage;
+                        document.getElementById('tel-cputemp').innerText = data.cpu_temp;
+                        document.getElementById('tel-gputemp').innerText = data.gpu_temp;
+                        document.getElementById('tel-ram').innerText = data.free_ram.toFixed(1);
+                        if (data.top_procs && data.top_procs.length > 0) {
+                            document.getElementById('tel-proc').innerText = `${data.top_procs[0].name} (${data.top_procs[0].cpu_percent.toFixed(1)}%)`;
+                        }
+                    }
+                }
+            } catch (e) {}
+        }, 1500);
+
+        window.onload = loadData;
+    </script>
+</body>
+</html>

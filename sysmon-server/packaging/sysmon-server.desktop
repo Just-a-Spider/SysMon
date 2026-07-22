@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=SysMon Server
+Comment=Hardware Companion Server for 3DS
+Exec=sysmon-server
+Icon=sysmon
+Terminal=false
+Type=Application
+Categories=System;Monitor;
+X-GNOME-Autostart-enabled=true
