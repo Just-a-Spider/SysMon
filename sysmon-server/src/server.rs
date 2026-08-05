@@ -52,6 +52,36 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
         enigo: Arc::new(tokio::sync::Mutex::new(enigo::Enigo::new(&enigo::Settings::default()).unwrap())),
     };
 
+    let poller_srv = srv_state.clone();
+    tokio::spawn(async move {
+        loop {
+            let interval_ms = {
+                let s = poller_srv.app_state.lock().await;
+                s.config.update_interval_ms
+            };
+            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            
+            let (weather, is_running) = {
+                let s = poller_srv.app_state.lock().await;
+                (s.weather_string.clone(), s.is_server_running)
+            };
+            
+            if !is_running {
+                break;
+            }
+            
+            let data = {
+                let mut poller = poller_srv.sys_poller.lock().await;
+                poller.poll_data(weather)
+            };
+            
+            {
+                let mut s = poller_srv.app_state.lock().await;
+                s.latest_telemetry = Some(data);
+            }
+        }
+    });
+
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("TCP Server listening on {}", addr);
     let listener = TcpListener::bind(addr).await.unwrap();
@@ -76,27 +106,22 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
                 tokio::spawn(async move {
                     loop {
                         interval.tick().await;
-                        let (weather, is_running) = {
+                        let (is_running, data_opt) = {
                             let mut s = srv_clone.app_state.lock().await;
                             s.last_ping = std::time::Instant::now();
-                            (s.weather_string.clone(), s.is_server_running)
+                            (s.is_server_running, s.latest_telemetry.clone())
                         };
                         
                         if !is_running {
                             break;
                         }
-                        let data = {
-                            let mut poller = srv_clone.sys_poller.lock().await;
-                            poller.poll_data(weather)
-                        };
-                        {
-                            let mut s = srv_clone.app_state.lock().await;
-                            s.latest_telemetry = Some(data.clone());
-                        }
-                        if let Ok(json) = serde_json::to_string(&data) {
-                            let msg = format!("{}\n", json);
-                            if tx.send(msg).await.is_err() {
-                                break;
+                        
+                        if let Some(data) = data_opt {
+                            if let Ok(json) = serde_json::to_string(&data) {
+                                let msg = format!("{}\n", json);
+                                if tx.send(msg).await.is_err() {
+                                    break;
+                                }
                             }
                         }
                     }
