@@ -19,11 +19,13 @@ pub struct AppConfig {
     pub update_interval_ms: u64,
     #[serde(default = "default_web_port")]
     pub web_port: u16,
+    #[serde(default)]
+    pub sort_by_ram: bool,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
-        Self { pin: "1234".to_string(), port: 7341, update_interval_ms: 1500, web_port: 7342 }
+        Self { pin: "1234".to_string(), port: 7341, update_interval_ms: 1500, web_port: 7342, sort_by_ram: false }
     }
 }
 

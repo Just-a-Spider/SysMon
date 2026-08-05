@@ -89,7 +89,7 @@ impl SysPoller {
         }
     }
 
-    pub fn poll_data(&mut self, weather: String) -> TelemetryData {
+    pub fn poll_data(&mut self, weather: String, sort_by_ram: bool) -> TelemetryData {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -98,12 +98,19 @@ impl SysPoller {
         let cpu_usage = self.sys.global_cpu_usage();
         let free_ram = self.sys.available_memory() as f32 / 1_000_000_000.0;
 
+        let total_mem = self.sys.total_memory() as f32;
         let mut procs = Vec::new();
         for (pid, process) in self.sys.processes() {
+            let cpu_val = if sort_by_ram {
+                (process.memory() as f32 / total_mem) * 100.0
+            } else {
+                process.cpu_usage()
+            };
+            
             procs.push(ProcessInfo {
                 pid: pid.as_u32(),
                 name: process.name().to_string_lossy().to_string(),
-                cpu_percent: process.cpu_usage(),
+                cpu_percent: cpu_val,
             });
         }
         procs.sort_by(|a, b| b.cpu_percent.partial_cmp(&a.cpu_percent).unwrap_or(std::cmp::Ordering::Equal));

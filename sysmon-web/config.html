@@ -166,6 +166,10 @@
                 <label>Update Interval (ms)</label>
                 <input type="number" id="config-interval">
             </div>
+            <div class="form-group">
+                <label style="display:inline;">Sort Heavy Process by RAM instead of CPU</label>
+                <input type="checkbox" id="config-sort-ram" style="width: auto;">
+            </div>
             <button onclick="saveConfig()">Save Settings</button>
         </div>
 
@@ -202,6 +206,7 @@
                 document.getElementById('config-port').value = cfg.port;
                 document.getElementById('config-web-port').value = cfg.web_port;
                 document.getElementById('config-interval').value = cfg.update_interval_ms;
+                document.getElementById('config-sort-ram').checked = cfg.sort_by_ram || false;
 
                 const macRes = await fetch('/api/macros');
                 macros = await macRes.json();
@@ -256,7 +261,8 @@
                 pin: document.getElementById('config-pin').value,
                 port: parseInt(document.getElementById('config-port').value),
                 web_port: parseInt(document.getElementById('config-web-port').value),
-                update_interval_ms: parseInt(document.getElementById('config-interval').value)
+                update_interval_ms: parseInt(document.getElementById('config-interval').value),
+                sort_by_ram: document.getElementById('config-sort-ram').checked
             };
 
             await fetch('/api/config', {

@@ -61,9 +61,9 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
             };
             tokio::time::sleep(Duration::from_millis(interval_ms)).await;
             
-            let (weather, is_running) = {
+            let (weather, is_running, sort_by_ram) = {
                 let s = poller_srv.app_state.lock().await;
-                (s.weather_string.clone(), s.is_server_running)
+                (s.weather_string.clone(), s.is_server_running, s.config.sort_by_ram)
             };
             
             if !is_running {
@@ -72,7 +72,7 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
             
             let data = {
                 let mut poller = poller_srv.sys_poller.lock().await;
-                poller.poll_data(weather)
+                poller.poll_data(weather, sort_by_ram)
             };
             
             {
