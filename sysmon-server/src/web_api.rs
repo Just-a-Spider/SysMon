@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::get,
     Router, Json, extract::{State, ConnectInfo}, response::Html, http::StatusCode
 };
 use std::sync::Arc;
