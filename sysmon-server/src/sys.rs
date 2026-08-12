@@ -23,6 +23,8 @@ pub struct TelemetryData {
     pub has_notification: bool,
     pub weather: String,
     pub now_playing: String,
+    pub volume: u8,
+    pub brightness: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -172,6 +174,8 @@ impl SysPoller {
             has_notification: false,
             weather,
             now_playing,
+            volume: get_volume_level(),
+            brightness: get_brightness_level(),
         }
     }
 
@@ -204,6 +208,60 @@ impl SysPoller {
     }
 }
 
+fn get_volume_level() -> u8 {
+    if let Ok(output) = Command::new("wpctl").args(&["get-volume", "@DEFAULT_AUDIO_SINK@"]).output() {
+        let s = String::from_utf8_lossy(&output.stdout);
+        if let Some(vol) = s.split_whitespace().nth(1) {
+            if let Ok(v) = vol.parse::<f32>() {
+                return (v * 100.0) as u8;
+            }
+        }
+    }
+    if let Ok(output) = Command::new("amixer").args(&["sget", "Master"]).output() {
+        let s = String::from_utf8_lossy(&output.stdout);
+        if let Some(start) = s.find('[') {
+            if let Some(end) = s[start..].find('%') {
+                if let Ok(v) = s[start+1..start+end].parse::<u8>() {
+                    return v;
+                }
+            }
+        }
+    }
+    72
+}
+
+fn get_brightness_level() -> u8 {
+    if let Ok(output) = Command::new("brightnessctl").arg("get").output() {
+        let val_s = String::from_utf8_lossy(&output.stdout);
+        if let Ok(val) = val_s.trim().parse::<f32>() {
+            if let Ok(max_output) = Command::new("brightnessctl").arg("m").output() {
+                let max_s = String::from_utf8_lossy(&max_output.stdout);
+                if let Ok(max_val) = max_s.trim().parse::<f32>() {
+                    if max_val > 0.0 {
+                        return ((val / max_val) * 100.0) as u8;
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir("/sys/class/backlight") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let (Ok(val_str), Ok(max_str)) = (
+                std::fs::read_to_string(path.join("brightness")),
+                std::fs::read_to_string(path.join("max_brightness")),
+            ) {
+                if let (Ok(val), Ok(max)) = (val_str.trim().parse::<f32>(), max_str.trim().parse::<f32>()) {
+                    if max > 0.0 {
+                        return ((val / max) * 100.0) as u8;
+                    }
+                }
+            }
+        }
+    }
+    48
+}
+
 pub fn trigger_notify() {
     let _ = Command::new("notify-send")
         .args(&["3DS Pomodoro", "Time to stretch!"])
@@ -213,6 +271,58 @@ pub fn trigger_notify() {
 pub fn kill_proc(pid: u32) {
     // Replaced massive /proc traversal with a direct native O(1) signal
     let _ = Command::new("kill").arg("-9").arg(pid.to_string()).spawn();
+}
+
+fn clamp_percent(value: u8) -> u8 {
+    value.min(100)
+}
+
+fn run_first_available(commands: &[(&str, Vec<String>)]) {
+    for (program, args) in commands {
+        if Command::new(program).args(args).spawn().is_ok() {
+            return;
+        }
+    }
+}
+
+pub fn set_volume_level(level: u8) {
+    let level = clamp_percent(level);
+    let level_str = format!("{}%", level);
+    run_first_available(&[
+        ("wpctl", vec!["set-volume".into(), "@DEFAULT_AUDIO_SINK@".into(), level_str.clone()]),
+        ("pactl", vec!["set-sink-volume".into(), "@DEFAULT_SINK@".into(), level_str.clone()]),
+        ("amixer", vec!["-D".into(), "pulse".into(), "sset".into(), "Master".into(), level_str]),
+    ]);
+}
+
+pub fn set_brightness_level(level: u8) {
+    let level = clamp_percent(level);
+    let level_str = format!("{}%", level);
+    
+    if Command::new("brightnessctl").args(&["set", &level_str]).spawn().is_ok() { return; }
+    if Command::new("xbacklight").args(&["-set", &level_str]).spawn().is_ok() { return; }
+    
+    if let Ok(entries) = std::fs::read_dir("/sys/class/backlight") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if let Ok(max_str) = std::fs::read_to_string(path.join("max_brightness")) {
+                if let Ok(max) = max_str.trim().parse::<f32>() {
+                    let target_val = ((level as f32 / 100.0) * max) as u32;
+                    let _ = Command::new("busctl")
+                        .args(&[
+                            "call", "org.freedesktop.login1",
+                            "/org/freedesktop/login1/session/auto",
+                            "org.freedesktop.login1.Session",
+                            "SetBrightness", "ssu", "backlight", &name,
+                            &target_val.to_string()
+                        ])
+                        .spawn();
+                    return;
+                }
+            }
+        }
+    }
 }
 
 use enigo::{Enigo, Keyboard, Key, Direction};

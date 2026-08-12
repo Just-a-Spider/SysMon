@@ -3,13 +3,15 @@
 
 #include <3ds.h>
 
-typedef struct {
+typedef struct
+{
     u32 pid;
     char name[32];
     float cpu;
 } ProcessInfo;
 
-typedef struct {
+typedef struct
+{
     char button[16];
     char type[8];
     char label[32];
@@ -40,9 +42,11 @@ extern int g_macro_count;
 extern char g_now_playing[64];
 extern u32 g_kill_confirm_pid;
 extern char g_kill_confirm_name[32];
+extern u64 g_last_level_touch_time;
 
-Result network_init(const char* ip, int port);
+Result network_init(const char *ip, int port);
 void network_exit();
-void network_send_json(const char* json_str);
+void network_send_json(const char *json_str);
+void network_send_level(const char *target, int value);
 
 #endif

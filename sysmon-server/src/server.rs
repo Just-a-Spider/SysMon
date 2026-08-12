@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::AppState;
 use std::net::SocketAddr;
-use crate::sys::{SysPoller, trigger_macro, kill_proc, trigger_notify};
+use crate::sys::{SysPoller, trigger_macro, kill_proc, trigger_notify, set_brightness_level, set_volume_level};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,6 +16,8 @@ struct ClientMessage {
     btn: Option<String>,
     pid: Option<u32>,
     pin: Option<String>,
+    target: Option<String>,
+    value: Option<u8>,
 }
 
 #[derive(Clone)]
@@ -229,6 +231,15 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
         },
         "notify" => {
             trigger_notify();
+        }
+        "set_level" => {
+            if let (Some(target), Some(value)) = (msg.target.as_deref(), msg.value) {
+                match target {
+                    "volume" => set_volume_level(value),
+                    "brightness" => set_brightness_level(value),
+                    _ => {}
+                }
+            }
         }
         _ => {}
     }
