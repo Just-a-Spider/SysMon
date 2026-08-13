@@ -8,32 +8,52 @@
 #include "network.h"
 #include "graphics.h"
 #include "input.h"
+#include "audio.h"
 
-int g_screen_mode = 0;
-int g_tab_scroll = 0;
-int g_control_target = 0;
-int g_volume_level = 72;
-int g_brightness_level = 48;
-int g_pomodoro_preset_index = 1;
+// ---------------------------------------------------------------------------
+// Global UI state
+// ---------------------------------------------------------------------------
+int g_screen_mode        = 0;
+int g_tab_scroll         = 0;
+int g_control_target     = 0;
+int g_volume_level       = 72;
+int g_brightness_level   = 48;
+int g_pomodoro_preset_index   = 1;
 int g_pomodoro_custom_minutes = 25;
-int g_pomodoro_seconds = 25 * 60;
-int g_pomodoro_active = 0;
-int g_selected_proc = 0;
+int g_pomodoro_seconds        = 25 * 60;
+int g_pomodoro_active         = 0;
+int g_selected_proc      = 0;
 
-u64 g_last_level_touch_time = 0;
+// Frame throttle (~20 fps)
+static u64 g_last_draw_time = 0;
+#define FRAME_INTERVAL_MS 50
+
+u64 g_last_level_touch_time  = 0;
 static u64 g_last_level_send_time = 0;
-static u64 last_btn_time = 0;
+static u64 last_btn_time          = 0;
 
+// ---------------------------------------------------------------------------
+// SET tab state machine
+// ---------------------------------------------------------------------------
+static int g_set_row      = 0;   // 0=THEME  1=SERVER
+static int g_set_sub      = 0;   // 0=main  1=manager  2=editor
+static int g_preview_idx  = 0;   // browsed index for focused row (Left/Right)
+static int g_editing      = 0;   // entry open in editor
+static int g_edit_field   = 0;   // focused field in editor
+static int g_edit_swatch  = 0;   // highlighted swatch in theme editor
+
+// Backup for cancel-revert in theme editor
+static ThemePreset g_edit_backup;
+
+// ---------------------------------------------------------------------------
+// Pomodoro helpers
+// ---------------------------------------------------------------------------
 static const int pomo_preset_minutes[] = {15, 25, 45, 60};
-static const int pomo_preset_count = 5;
+static const int pomo_preset_count     = 5;
 
-static int clamp_int(int value, int min_value, int max_value)
+static int clamp_int(int v, int lo, int hi)
 {
-    if (value < min_value)
-        return min_value;
-    if (value > max_value)
-        return max_value;
-    return value;
+    return v < lo ? lo : v > hi ? hi : v;
 }
 
 static int current_pomodoro_minutes(void)
@@ -45,12 +65,8 @@ static int current_pomodoro_minutes(void)
 
 static void save_pomodoro_config(void)
 {
-    FILE *f_out = fopen("sdmc:/sysmon_pomo.txt", "w");
-    if (f_out)
-    {
-        fprintf(f_out, "%d %d", g_pomodoro_preset_index, g_pomodoro_custom_minutes);
-        fclose(f_out);
-    }
+    FILE *f = fopen("sdmc:/sysmon_pomo.txt", "w");
+    if (f) { fprintf(f, "%d %d", g_pomodoro_preset_index, g_pomodoro_custom_minutes); fclose(f); }
 }
 
 static void load_pomodoro_config(void)
@@ -60,149 +76,191 @@ static void load_pomodoro_config(void)
     {
         if (fscanf(f, "%d %d", &g_pomodoro_preset_index, &g_pomodoro_custom_minutes) < 2)
         {
-            g_pomodoro_preset_index = 1;
+            g_pomodoro_preset_index   = 1;
             g_pomodoro_custom_minutes = 25;
         }
         fclose(f);
     }
-
-    g_pomodoro_preset_index = clamp_int(g_pomodoro_preset_index, 0, pomo_preset_count - 1);
+    g_pomodoro_preset_index   = clamp_int(g_pomodoro_preset_index,   0, pomo_preset_count - 1);
     g_pomodoro_custom_minutes = clamp_int(g_pomodoro_custom_minutes, 5, 180);
 }
 
-static void sync_pomodoro_seconds(void)
-{
-    if (!g_pomodoro_active)
-        g_pomodoro_seconds = current_pomodoro_minutes() * 60;
-}
-
+static void sync_pomodoro_seconds(void) { if (!g_pomodoro_active) g_pomodoro_seconds = current_pomodoro_minutes() * 60; }
 static void set_pomodoro_preset(int delta)
 {
     g_pomodoro_preset_index = (g_pomodoro_preset_index + delta + pomo_preset_count) % pomo_preset_count;
-    save_pomodoro_config();
-    sync_pomodoro_seconds();
+    save_pomodoro_config(); sync_pomodoro_seconds();
 }
-
 static void adjust_custom_pomodoro_minutes(int delta)
 {
-    if (g_pomodoro_preset_index != 4)
-        return;
-
+    if (g_pomodoro_preset_index != 4) return;
     g_pomodoro_custom_minutes = clamp_int(g_pomodoro_custom_minutes + delta, 5, 180);
-    save_pomodoro_config();
-    sync_pomodoro_seconds();
+    save_pomodoro_config(); sync_pomodoro_seconds();
 }
 
+// ---------------------------------------------------------------------------
+// Level dial helper
+// ---------------------------------------------------------------------------
 static int throttle_level_from_touch(float px, float py)
 {
-    const float cx = 132.0f;
-    const float cy = 146.0f;
-    const float inner_r = 36.0f;
-    const float outer_r = 70.0f;
-    const float start_angle = 2.3561945f;
-    const float sweep = 4.7123890f;
-    const float two_pi = 6.2831853f;
-
-    float dx = px - cx;
-    float dy = cy - py;
-    float dist = sqrtf((dx * dx) + (dy * dy));
-    if (dist < inner_r || dist > outer_r)
-        return -1;
-
-    float angle = atan2f(dy, dx);
-    if (angle < 0.0f)
-        angle += two_pi;
-
-    float pos = angle - start_angle;
-    if (pos < 0.0f)
-        pos += two_pi;
-
-    if (pos > sweep)
-        return -1;
-
-    return (int)((pos / sweep) * 100.0f + 0.5f);
+    const float cx=132.0f, cy=146.0f, inner_r=36.0f, outer_r=70.0f;
+    const float start_angle=2.3561945f, sweep=4.7123890f, two_pi=6.2831853f;
+    float dx=px-cx, dy=cy-py;
+    float dist=sqrtf(dx*dx+dy*dy);
+    if (dist<inner_r||dist>outer_r) return -1;
+    float angle=atan2f(dy,dx);
+    if (angle<0.0f) angle+=two_pi;
+    float pos=angle-start_angle;
+    if (pos<0.0f) pos+=two_pi;
+    if (pos>sweep) return -1;
+    return (int)((pos/sweep)*100.0f+0.5f);
 }
 
-int main()
+// ---------------------------------------------------------------------------
+// SET sub-view helpers
+// ---------------------------------------------------------------------------
+static void set_enter_manager(void)
+{
+    g_set_sub    = 1;
+    g_preview_idx = (g_set_row == 0) ? g_theme_index : g_profile_index;
+    audio_play_click();
+}
+
+static void set_enter_editor(int idx)
+{
+    g_editing    = idx;
+    g_edit_field = 0;
+    g_edit_swatch = 0;
+    g_set_sub    = 2;
+    if (g_set_row == 0)
+    {
+        ThemePreset *t = graphics_get_theme_mut(idx);
+        if (t) g_edit_backup = *t; // snapshot for cancel
+    }
+    audio_play_click();
+}
+
+static void set_apply_theme_preview(int idx)
+{
+    // Apply for live preview (not saved yet)
+    graphics_apply_theme(idx);
+}
+
+static void set_apply_and_save_theme(int idx)
+{
+    g_theme_index = idx;
+    graphics_apply_theme(g_theme_index);
+    graphics_save_themes();
+    audio_play_confirm();
+}
+
+static void set_apply_and_save_server(int idx)
+{
+    g_profile_index = idx;
+    network_save_profiles();
+    strncpy(g_auth_key, g_profiles[g_profile_index].pin, sizeof(g_auth_key) - 1);
+    network_exit();
+    network_init(g_profiles[g_profile_index].ip, g_profiles[g_profile_index].port);
+    audio_play_confirm();
+}
+
+static void set_revert_preview(void)
+{
+    // Called when leaving SET without applying — restore saved theme
+    graphics_apply_theme(g_theme_index);
+    g_preview_idx = g_theme_index;
+    g_set_sub     = 0;
+}
+
+// ---------------------------------------------------------------------------
+// main()
+// ---------------------------------------------------------------------------
+int main(void)
 {
     gfxInitDefault();
     romfsInit();
     ptmuInit();
 
-    char ip_buffer[60] = "192.168.0.6";
-    int port = 7341;
-
     load_pomodoro_config();
     g_pomodoro_seconds = current_pomodoro_minutes() * 60;
 
-    int need_prompt = 1;
-    FILE *f = fopen("sdmc:/sysmon_cfg.txt", "r");
-    if (f)
+    // Load server profiles (migrates old sysmon_cfg.txt automatically)
+    network_load_profiles();
+
+    // Prompt only if no valid profile was loaded
+    if (g_profile_count == 0 || g_profiles[0].ip[0] == '\0')
     {
-        if (fscanf(f, "%59s %d %15s", ip_buffer, &port, g_auth_key) >= 2)
-        {
-            need_prompt = 0;
-        }
-        fclose(f);
+        g_profile_count = 1;
+        snprintf(g_profiles[0].name, sizeof(g_profiles[0].name), "HOME");
+        snprintf(g_profiles[0].ip,   sizeof(g_profiles[0].ip),   "192.168.0.1");
+        g_profiles[0].port = 7341;
+        snprintf(g_profiles[0].pin,  sizeof(g_profiles[0].pin),  "1234");
+        prompt_for_ip(g_profiles[0].ip, sizeof(g_profiles[0].ip));
+        prompt_for_port(&g_profiles[0].port);
+        prompt_for_key(g_profiles[0].pin, sizeof(g_profiles[0].pin));
+        snprintf(g_auth_key, sizeof(g_auth_key), "%s", g_profiles[0].pin);
+        g_profile_index = 0;
+        network_save_profiles();
     }
 
-    if (need_prompt)
-    {
-        prompt_for_ip(ip_buffer, sizeof(ip_buffer));
-        prompt_for_port(&port);
-        prompt_for_key(g_auth_key, sizeof(g_auth_key));
-
-        FILE *f_out = fopen("sdmc:/sysmon_cfg.txt", "w");
-        if (f_out)
-        {
-            fprintf(f_out, "%s %d %s", ip_buffer, port, g_auth_key);
-            fclose(f_out);
-        }
-    }
-
-    network_init(ip_buffer, port);
+    // graphics_init() calls graphics_load_themes() + graphics_apply_theme()
+    network_init(g_profiles[g_profile_index].ip, g_profiles[g_profile_index].port);
     graphics_init();
+    audio_init();
 
+    g_preview_idx = g_theme_index;
+
+    // ---------------------------------------------------------------------------
+    // Main loop
+    // ---------------------------------------------------------------------------
     while (aptMainLoop())
     {
         hidScanInput();
         u32 kDown = hidKeysDown();
-        u32 kUp = hidKeysUp();
-        if (kDown & KEY_START)
-            break;
+        u32 kUp   = hidKeysUp();
+        if (kDown & KEY_START) break;
 
         touchPosition touch;
         hidTouchRead(&touch);
         u32 kHeld = hidKeysHeld();
 
-        // Tab drawer: every touch is a discrete tap (row or arrow) - no
-        // drag gestures, since the resistive touchscreen handles taps far
-        // more reliably than swipes.
+        // Tab drawer — discrete taps only
         if (g_kill_confirm_pid == 0 && (kDown & KEY_TOUCH) && touch.px > 270)
         {
             int new_scroll = g_tab_scroll;
-            int hit = graphics_tab_touch_hit((float)touch.px, (float)touch.py, g_tab_scroll, &new_scroll);
+            int hit = graphics_tab_touch_hit((float)touch.px, (float)touch.py,
+                                             g_tab_scroll, &new_scroll);
             if (hit == -2)
+            {
                 g_tab_scroll = new_scroll;
-            else if (hit >= 0)
+            }
+            else if (hit >= 0 && hit != g_screen_mode)
+            {
+                // Leaving SET: revert live theme preview if not applied
+                if (g_screen_mode == 4) set_revert_preview();
                 g_screen_mode = hit;
+                audio_play_click();
+            }
         }
 
-        // Global Select to toggle fetching
+        // SELECT toggles fetching
         if (kDown & KEY_SELECT)
-        {
             g_fetching_enabled = !g_fetching_enabled;
-        }
 
         u64 now = osGetTime();
 
+        // ----------------------------------------------------------------
+        // Per-mode input
+        // ----------------------------------------------------------------
         if (g_kill_confirm_pid > 0)
         {
             if (kDown & KEY_A)
             {
                 char msg[128];
-                snprintf(msg, sizeof(msg), "{\"action\":\"kill\",\"pid\":%d,\"pin\":\"%s\"}", (int)g_kill_confirm_pid, g_auth_key);
+                snprintf(msg, sizeof(msg), "{\"action\":\"kill\",\"pid\":%d,\"pin\":\"%s\"}",
+                         (int)g_kill_confirm_pid, g_auth_key);
                 network_send_json(msg);
+                audio_play_confirm();
                 g_kill_confirm_pid = 0;
                 g_kill_confirm_name[0] = '\0';
             }
@@ -212,24 +270,17 @@ int main()
                 g_kill_confirm_name[0] = '\0';
             }
         }
+        // ---- POMO (mode 0) ----
         else if (g_screen_mode == 0)
         {
-            if (kDown & KEY_A)
-                g_pomodoro_active = !g_pomodoro_active;
-            if (kDown & KEY_Y)
-            {
-                g_pomodoro_seconds = current_pomodoro_minutes() * 60;
-                g_pomodoro_active = 0;
-            }
-            if (kDown & KEY_L)
-                set_pomodoro_preset(-1);
-            if (kDown & KEY_R)
-                set_pomodoro_preset(1);
-            if (kDown & KEY_DUP)
-                adjust_custom_pomodoro_minutes(5);
-            if (kDown & KEY_DDOWN)
-                adjust_custom_pomodoro_minutes(-5);
+            if (kDown & KEY_A)  g_pomodoro_active = !g_pomodoro_active;
+            if (kDown & KEY_Y)  { g_pomodoro_seconds = current_pomodoro_minutes()*60; g_pomodoro_active=0; }
+            if (kDown & KEY_L)  set_pomodoro_preset(-1);
+            if (kDown & KEY_R)  set_pomodoro_preset(1);
+            if (kDown & KEY_DUP)   adjust_custom_pomodoro_minutes(5);
+            if (kDown & KEY_DDOWN) adjust_custom_pomodoro_minutes(-5);
         }
+        // ---- KILL (mode 1) ----
         else if (g_screen_mode == 1)
         {
             if (kDown & KEY_TOUCH && touch.px < 260)
@@ -242,6 +293,7 @@ int main()
                 }
             }
         }
+        // ---- MACRO (mode 2) ----
         else if (g_screen_mode == 2)
         {
             if (kDown && (now - last_btn_time > 300))
@@ -250,109 +302,379 @@ int main()
 
                 if (kDown & KEY_TOUCH && touch.px < 260)
                 {
-                    int cols = 2;
-                    int btn_w = 120;
-                    int btn_h = 40;
-                    int start_x = 10;
-                    int start_y = 60;
+                    // Auto-fit grid — must match macro_tab.c constants
+                    #define MACRO_COLS     2
+                    #define MACRO_AREA_TOP 50
+                    #define MACRO_AREA_H   188
+                    #define MACRO_GAP      6
+                    #define MACRO_BTN_W    ((260 - MACRO_AREA_TOP/10 - MACRO_GAP) / MACRO_COLS)
+
+                    int rows  = (g_macro_count + MACRO_COLS - 1) / MACRO_COLS;
+                    int btn_h = (MACRO_AREA_H - MACRO_GAP * (rows - 1)) / rows;
+                    int row_h = btn_h + MACRO_GAP;
 
                     for (int i = 0; i < g_macro_count; i++)
                     {
-                        int row = i / cols;
-                        int col = i % cols;
-                        int bx = start_x + (col * (btn_w + 10));
-                        int by = start_y + (row * (btn_h + 10));
+                        int row = i / MACRO_COLS;
+                        int col = i % MACRO_COLS;
+                        int bx  = 10 + col * (MACRO_BTN_W + MACRO_GAP);
+                        int by  = MACRO_AREA_TOP + row * row_h;
 
-                        if (touch.px >= bx && touch.px <= bx + btn_w &&
+                        if (touch.px >= bx && touch.px <= bx + MACRO_BTN_W &&
                             touch.py >= by && touch.py <= by + btn_h)
                         {
                             btn = g_macros[i].button;
                             break;
                         }
                     }
+                    #undef MACRO_COLS
+                    #undef MACRO_AREA_TOP
+                    #undef MACRO_AREA_H
+                    #undef MACRO_GAP
+                    #undef MACRO_BTN_W
                 }
                 else
                 {
-                    if (kDown & KEY_A)
-                        btn = "A";
-                    else if (kDown & KEY_B)
-                        btn = "B";
-                    else if (kDown & KEY_X)
-                        btn = "X";
-                    else if (kDown & KEY_Y)
-                        btn = "Y";
-                    else if (kDown & KEY_L)
-                        btn = "L";
-                    else if (kDown & KEY_R)
-                        btn = "R";
-                    else if (kDown & KEY_ZL)
-                        btn = "ZL";
-                    else if (kDown & KEY_ZR)
-                        btn = "ZR";
-                    else if (kDown & KEY_DUP)
-                        btn = "DUP";
-                    else if (kDown & KEY_DDOWN)
-                        btn = "DDOWN";
-                    else if (kDown & KEY_DLEFT)
-                        btn = "DLEFT";
-                    else if (kDown & KEY_DRIGHT)
-                        btn = "DRIGHT";
+                    if      (kDown & KEY_A)      btn = "A";
+                    else if (kDown & KEY_B)      btn = "B";
+                    else if (kDown & KEY_X)      btn = "X";
+                    else if (kDown & KEY_Y)      btn = "Y";
+                    else if (kDown & KEY_L)      btn = "L";
+                    else if (kDown & KEY_R)      btn = "R";
+                    else if (kDown & KEY_ZL)     btn = "ZL";
+                    else if (kDown & KEY_ZR)     btn = "ZR";
+                    else if (kDown & KEY_DUP)    btn = "DUP";
+                    else if (kDown & KEY_DDOWN)  btn = "DDOWN";
+                    else if (kDown & KEY_DLEFT)  btn = "DLEFT";
+                    else if (kDown & KEY_DRIGHT) btn = "DRIGHT";
                 }
 
                 if (btn)
                 {
                     char msg[128];
-                    snprintf(msg, sizeof(msg), "{\"action\":\"button\",\"btn\":\"%s\",\"pin\":\"%s\"}", btn, g_auth_key);
+                    snprintf(msg, sizeof(msg), "{\"action\":\"button\",\"btn\":\"%s\",\"pin\":\"%s\"}",
+                             btn, g_auth_key);
                     network_send_json(msg);
+                    audio_play_confirm();
                     last_btn_time = now;
                 }
             }
         }
+        // ---- MEDIA (mode 3) ----
         else if (g_screen_mode == 3)
         {
             if (kDown & KEY_TOUCH && touch.py >= 100 && touch.py <= 140)
             {
                 char *btn = NULL;
-                if (touch.px >= 20 && touch.px <= 80)
-                    btn = "prev";
-                else if (touch.px >= 100 && touch.px <= 170)
-                    btn = "playpause";
-                else if (touch.px >= 190 && touch.px <= 250)
-                    btn = "next";
+                if      (touch.px >= 20  && touch.px <= 80)  btn = "prev";
+                else if (touch.px >= 100 && touch.px <= 170) btn = "playpause";
+                else if (touch.px >= 190 && touch.px <= 250) btn = "next";
 
                 if (btn)
                 {
                     char msg[128];
-                    snprintf(msg, sizeof(msg), "{\"action\":\"media\",\"btn\":\"%s\",\"pin\":\"%s\"}", btn, g_auth_key);
+                    snprintf(msg, sizeof(msg), "{\"action\":\"media\",\"btn\":\"%s\",\"pin\":\"%s\"}",
+                             btn, g_auth_key);
                     network_send_json(msg);
+                    audio_play_confirm();
                 }
             }
         }
+        // ---- SET (mode 4) ----
         else if (g_screen_mode == 4)
         {
-            if (kDown & KEY_TOUCH && touch.py > 80 && touch.py < 120 && touch.px > 35 && touch.px < 235)
-            {
-                prompt_for_ip(ip_buffer, sizeof(ip_buffer));
-                prompt_for_port(&port);
-                prompt_for_key(g_auth_key, sizeof(g_auth_key));
+            int tc = graphics_theme_count();
+            int pc = g_profile_count;
 
-                FILE *f_out = fopen("sdmc:/sysmon_cfg.txt", "w");
-                if (f_out)
+            if (g_set_sub == 0) // ======== MAIN VIEW ========
+            {
+                // D-UP/DOWN: switch focused row
+                if (kDown & KEY_DUP)
                 {
-                    fprintf(f_out, "%s %d %s", ip_buffer, port, g_auth_key);
-                    fclose(f_out);
+                    if (g_set_row != 0)
+                    {
+                        g_set_row     = 0;
+                        g_preview_idx = g_theme_index;
+                        set_apply_theme_preview(g_preview_idx);
+                        audio_play_click();
+                    }
+                }
+                if (kDown & KEY_DDOWN)
+                {
+                    if (g_set_row != 1)
+                    {
+                        // Revert theme to saved before switching to SERVER row
+                        graphics_apply_theme(g_theme_index);
+                        g_set_row     = 1;
+                        g_preview_idx = g_profile_index;
+                        audio_play_click();
+                    }
                 }
 
-                network_exit();
-                network_init(ip_buffer, port);
+                // D-LEFT/RIGHT: rotate options within focused row
+                if (kDown & KEY_DLEFT)
+                {
+                    int cnt = (g_set_row == 0) ? tc : pc;
+                    g_preview_idx = (g_preview_idx - 1 + cnt) % cnt;
+                    if (g_set_row == 0) set_apply_theme_preview(g_preview_idx);
+                    audio_play_click();
+                }
+                if (kDown & KEY_DRIGHT)
+                {
+                    int cnt = (g_set_row == 0) ? tc : pc;
+                    g_preview_idx = (g_preview_idx + 1) % cnt;
+                    if (g_set_row == 0) set_apply_theme_preview(g_preview_idx);
+                    audio_play_click();
+                }
+
+                // A: apply current preview
+                if (kDown & KEY_A)
+                {
+                    if (g_set_row == 0)
+                        set_apply_and_save_theme(g_preview_idx);
+                    else
+                        set_apply_and_save_server(g_preview_idx);
+                }
+
+                // Y: edit current selection
+                if (kDown & KEY_Y)
+                    set_enter_editor(g_preview_idx);
+
+                // X: open manager
+                if (kDown & KEY_X)
+                    set_enter_manager();
+            }
+            else if (g_set_sub == 1) // ======== MANAGER ========
+            {
+                int count = (g_set_row == 0) ? tc : pc;
+
+                // D-UP/DOWN: navigate list
+                if (kDown & KEY_DUP)
+                {
+                    g_preview_idx = (g_preview_idx - 1 + count) % count;
+                    if (g_set_row == 0) set_apply_theme_preview(g_preview_idx);
+                    audio_play_click();
+                }
+                if (kDown & KEY_DDOWN)
+                {
+                    g_preview_idx = (g_preview_idx + 1) % count;
+                    if (g_set_row == 0) set_apply_theme_preview(g_preview_idx);
+                    audio_play_click();
+                }
+
+                // A: apply selected
+                if (kDown & KEY_A)
+                {
+                    if (g_set_row == 0) set_apply_and_save_theme(g_preview_idx);
+                    else                set_apply_and_save_server(g_preview_idx);
+                    g_set_sub = 0;
+                }
+
+                // Y: edit selected entry
+                if (kDown & KEY_Y)
+                    set_enter_editor(g_preview_idx);
+
+                // Touch: row tap or DEL
+                if (kDown & KEY_TOUCH && touch.px < 260)
+                {
+                    for (int i = 0; i < count && i < 4; i++)
+                    {
+                        float ry = 24.0f + i * 46.0f;
+                        if (touch.py >= ry && touch.py < ry + 38)
+                        {
+                            if (touch.px >= 212 && count > 1)
+                            {
+                                // DEL
+                                if (g_set_row == 0)
+                                {
+                                    graphics_delete_theme(i);
+                                    set_apply_theme_preview(g_theme_index);
+                                }
+                                else
+                                {
+                                    if (g_profile_count > 1)
+                                    {
+                                        for (int j = i; j < g_profile_count - 1; j++)
+                                            g_profiles[j] = g_profiles[j + 1];
+                                        g_profile_count--;
+                                        if (g_profile_index >= g_profile_count) g_profile_index = 0;
+                                        network_save_profiles();
+                                    }
+                                }
+                                g_preview_idx = clamp_int(g_preview_idx, 0,
+                                    (g_set_row == 0 ? graphics_theme_count() : g_profile_count) - 1);
+                                audio_play_confirm();
+                            }
+                            else
+                            {
+                                g_preview_idx = i;
+                                if (g_set_row == 0) set_apply_theme_preview(g_preview_idx);
+                                audio_play_click();
+                            }
+                        }
+                    }
+                    // [+ NEW] button
+                    float ny = 24.0f + 4 * 46.0f;
+                    if (ny > 200.0f) ny = 200.0f;
+                    if (touch.py >= ny && touch.py < ny + 30)
+                    {
+                        int new_idx;
+                        if (g_set_row == 0)
+                            new_idx = graphics_add_theme();
+                        else
+                        {
+                            if (g_profile_count < MAX_SERVER_PROFILES)
+                            {
+                                g_profiles[g_profile_count] = g_profiles[g_profile_index];
+                                snprintf(g_profiles[g_profile_count].name,
+                                         sizeof(g_profiles[0].name), "NEW%d", g_profile_count);
+                                new_idx = g_profile_count++;
+                            }
+                            else new_idx = g_profile_count - 1;
+                        }
+                        set_enter_editor(new_idx);
+                    }
+                }
+
+                // B: back
+                if (kDown & KEY_B)
+                {
+                    graphics_apply_theme(g_theme_index); // revert preview
+                    g_preview_idx = g_theme_index;
+                    g_set_sub = 0;
+                    audio_play_click();
+                }
+            }
+            else if (g_set_sub == 2) // ======== EDITOR ========
+            {
+                if (g_set_row == 0) // Theme editor
+                {
+                    ThemePreset *t = graphics_get_theme_mut(g_editing);
+                    int fields = 5; // BG, PANEL, AC1, AC2, DNG
+
+                    // D-UP/DOWN: move between fields
+                    if (kDown & KEY_DUP)   { g_edit_field = (g_edit_field - 1 + fields) % fields; audio_play_click(); }
+                    if (kDown & KEY_DDOWN) { g_edit_field = (g_edit_field + 1) % fields; audio_play_click(); }
+
+                    if (kDown & KEY_DLEFT)
+                    {
+                        int pc = graphics_palette_count();
+                        g_edit_swatch = (g_edit_swatch - 1 + pc) % pc;
+                        audio_play_click();
+                    }
+                    if (kDown & KEY_DRIGHT)
+                    {
+                        int pc = graphics_palette_count();
+                        g_edit_swatch = (g_edit_swatch + 1) % pc;
+                        audio_play_click();
+                    }
+
+                    // A: apply swatch to focused field
+                    if (kDown & KEY_A && t)
+                    {
+                        u8 r, g, b;
+                        graphics_palette_color(g_edit_swatch, &r, &g, &b);
+                        switch (g_edit_field) {
+                        case 0: t->bg_r=r;  t->bg_g=g;  t->bg_b=b;  break;
+                        case 1: t->pan_r=r; t->pan_g=g; t->pan_b=b;
+                                // auto-derive dim = pan * 0.85
+                                t->dim_r=(u8)(r*85/100);
+                                t->dim_g=(u8)(g*85/100);
+                                t->dim_b=(u8)(b*85/100); break;
+                        case 2: t->ac1_r=r; t->ac1_g=g; t->ac1_b=b; break;
+                        case 3: t->ac2_r=r; t->ac2_g=g; t->ac2_b=b; break;
+                        case 4: t->dng_r=r; t->dng_g=g; t->dng_b=b; break;
+                        }
+                        graphics_apply_theme(g_editing); // live preview of edit
+                        audio_play_confirm();
+                    }
+
+                    // Touch: name field tap (y=202..220) → swkbd rename
+                    if (kDown & KEY_TOUCH && touch.py >= 202 && touch.py < 220 && t)
+                    {
+                        prompt_for_name("Preset name", t->name, sizeof(t->name));
+                        audio_play_click();
+                    }
+
+                    // Y: save and go back
+                    if (kDown & KEY_Y && t)
+                    {
+                        g_theme_index = g_editing;
+                        graphics_apply_theme(g_theme_index);
+                        graphics_save_themes();
+                        g_preview_idx = g_theme_index;
+                        g_set_sub = 0;
+                        audio_play_confirm();
+                    }
+
+                    // B: cancel, restore backup
+                    if (kDown & KEY_B && t)
+                    {
+                        *t = g_edit_backup;
+                        graphics_apply_theme(g_theme_index);
+                        g_set_sub = 0;
+                        audio_play_click();
+                    }
+                }
+                else // Server editor
+                {
+                    if (g_editing < 0 || g_editing >= g_profile_count) { g_set_sub=0; }
+                    else
+                    {
+                        ServerProfile *p = &g_profiles[g_editing];
+
+                        // D-UP/DOWN: navigate fields
+                        if (kDown & KEY_DUP)   { g_edit_field = (g_edit_field - 1 + 4) % 4; audio_play_click(); }
+                        if (kDown & KEY_DDOWN) { g_edit_field = (g_edit_field + 1) % 4;     audio_play_click(); }
+
+                        // Touch: tap a field row to open swkbd
+                        if (kDown & KEY_TOUCH || (kDown & KEY_A))
+                        {
+                            int field_to_edit = -1;
+                            if (kDown & KEY_A)
+                            {
+                                field_to_edit = g_edit_field; // A edits focused field
+                            }
+                            else
+                            {
+                                for (int fi = 0; fi < 4; fi++)
+                                {
+                                    float ry = 28.0f + fi * 44.0f;
+                                    if (touch.py >= ry && touch.py < ry + 36 && touch.px < 260)
+                                        { field_to_edit = fi; break; }
+                                }
+                            }
+
+                            if (field_to_edit >= 0)
+                            {
+                                switch (field_to_edit) {
+                                case 0: prompt_for_name("Profile name", p->name, sizeof(p->name)); break;
+                                case 1: prompt_for_ip(p->ip, sizeof(p->ip)); break;
+                                case 2: prompt_for_port(&p->port); break;
+                                case 3: prompt_for_key(p->pin, sizeof(p->pin)); break;
+                                }
+                                audio_play_click();
+                            }
+                        }
+
+                        // Y: save
+                        if (kDown & KEY_Y)
+                        {
+                            set_apply_and_save_server(g_editing);
+                            g_set_sub = 0;
+                        }
+
+                        // B: cancel (no write)
+                        if (kDown & KEY_B) { g_set_sub = 0; audio_play_click(); }
+                    }
+                }
             }
         }
+        // ---- LEVEL (mode 5) ----
         else if (g_screen_mode == 5)
         {
             if (kDown & KEY_X)
-            {
                 g_control_target = !g_control_target;
-            }
 
             if (kHeld & KEY_TOUCH)
             {
@@ -365,10 +687,7 @@ int main()
                         {
                             g_volume_level = level;
                             if (now - g_last_level_send_time > 200)
-                            {
-                                network_send_level("volume", level);
-                                g_last_level_send_time = now;
-                            }
+                                { network_send_level("volume", level); g_last_level_send_time = now; }
                             g_last_level_touch_time = now;
                         }
                     }
@@ -376,10 +695,7 @@ int main()
                     {
                         g_brightness_level = level;
                         if (now - g_last_level_send_time > 200)
-                        {
-                            network_send_level("brightness", level);
-                            g_last_level_send_time = now;
-                        }
+                            { network_send_level("brightness", level); g_last_level_send_time = now; }
                         g_last_level_touch_time = now;
                     }
                 }
@@ -389,20 +705,20 @@ int main()
                 int level = throttle_level_from_touch((float)touch.px, (float)touch.py);
                 if (level >= 0)
                 {
-                    if (g_control_target == 0)
-                        network_send_level("volume", level);
-                    else
-                        network_send_level("brightness", level);
-                    g_last_level_send_time = now;
+                    if (g_control_target == 0) network_send_level("volume", level);
+                    else                       network_send_level("brightness", level);
+                    g_last_level_send_time  = now;
                     g_last_level_touch_time = now;
                 }
             }
         }
 
+        // ----------------------------------------------------------------
+        // Pomodoro timer tick
+        // ----------------------------------------------------------------
         static time_t lastPomoTime = 0;
         time_t currentTime = time(NULL);
-        if (lastPomoTime == 0)
-            lastPomoTime = currentTime;
+        if (lastPomoTime == 0) lastPomoTime = currentTime;
 
         if (g_pomodoro_active)
         {
@@ -411,9 +727,8 @@ int main()
                 g_pomodoro_seconds--;
                 if (g_pomodoro_seconds <= 0)
                 {
-                    g_pomodoro_active = 0;
+                    g_pomodoro_active  = 0;
                     g_pomodoro_seconds = current_pomodoro_minutes() * 60;
-
                     char msg[128];
                     snprintf(msg, sizeof(msg), "{\"action\":\"notify\",\"pin\":\"%s\"}", g_auth_key);
                     network_send_json(msg);
@@ -421,14 +736,24 @@ int main()
                 lastPomoTime = currentTime;
             }
         }
-        else
-        {
-            lastPomoTime = currentTime;
-        }
+        else lastPomoTime = currentTime;
 
-        graphics_draw_frame(ip_buffer, port);
+        // ----------------------------------------------------------------
+        // Frame throttle (~20 fps)
+        // ----------------------------------------------------------------
+        {
+            u64 now_draw = osGetTime();
+            if (now_draw - g_last_draw_time >= FRAME_INTERVAL_MS)
+            {
+                g_last_draw_time = now_draw;
+                graphics_draw_frame(g_set_sub, g_set_row, g_preview_idx,
+                                    g_editing, g_edit_field, g_edit_swatch);
+            }
+            else svcSleepThread(5 * 1000000LL);
+        }
     }
 
+    audio_exit();
     graphics_exit();
     ptmuExit();
     network_exit();

@@ -18,6 +18,29 @@ typedef struct
     char color[16];
 } MacroInfo;
 
+// ---------------------------------------------------------------------------
+// Server profiles (multi-server support)
+// ---------------------------------------------------------------------------
+#define MAX_SERVER_PROFILES 8
+
+typedef struct
+{
+    char name[16];
+    char ip[60];
+    int  port;
+    char pin[16];
+} ServerProfile;
+
+extern ServerProfile g_profiles[MAX_SERVER_PROFILES];
+extern int g_profile_count;
+extern int g_profile_index;
+
+void network_load_profiles(void);   // reads sysmon_cfg.txt, migrates old format
+void network_save_profiles(void);   // writes new multi-profile format
+
+// ---------------------------------------------------------------------------
+// Telemetry globals
+// ---------------------------------------------------------------------------
 extern float g_cpu_temp;
 extern float g_gpu_temp;
 extern float g_free_ram;
@@ -44,9 +67,12 @@ extern u32 g_kill_confirm_pid;
 extern char g_kill_confirm_name[32];
 extern u64 g_last_level_touch_time;
 
+// ---------------------------------------------------------------------------
+// Network API
+// ---------------------------------------------------------------------------
 Result network_init(const char *ip, int port);
-void network_exit();
-void network_send_json(const char *json_str);
-void network_send_level(const char *target, int value);
+void   network_exit(void);
+void   network_send_json(const char *json_str);
+void   network_send_level(const char *target, int value);
 
 #endif

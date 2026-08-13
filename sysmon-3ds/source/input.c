@@ -51,3 +51,13 @@ void prompt_for_key(char *key_buffer, int buffer_size)
         // Keep existing if cancelled
     }
 }
+
+void prompt_for_name(const char *hint, char *buf, int size)
+{
+    SwkbdState swkbd;
+    swkbdInit(&swkbd, SWKBD_TYPE_NORMAL, 1, size - 1);
+    swkbdSetValidation(&swkbd, SWKBD_NOTEMPTY_NOTBLANK, 0, 0);
+    swkbdSetHintText(&swkbd, hint ? hint : "Enter name");
+    swkbdSetInitialText(&swkbd, buf);
+    swkbdInputText(&swkbd, buf, size);
+}
