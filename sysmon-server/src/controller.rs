@@ -177,32 +177,32 @@ fn apply_gamepad_state(
     // bit 14: ZL, bit 15: ZR
 
     // Physical Position Mapping (Default for PSP / standard controllers):
-    // 3DS B (South) -> BTN_SOUTH (Cross / A)
-    // 3DS A (East)  -> BTN_EAST  (Circle / B)
-    // 3DS Y (West)  -> BTN_WEST  (Square / X)
-    // 3DS X (North) -> BTN_NORTH (Triangle / Y)
-    let is_physical_map = (flags & 0x04) != 0 || true;
+    // 3DS B (South/Bottom) -> BTN_SOUTH (0x130, Steam A)
+    // 3DS A (East/Right)   -> BTN_EAST  (0x131, Steam B)
+    // 3DS Y (West/Left)    -> BTN_NORTH (0x133, kernel BTN_X -> Steam X)
+    // 3DS X (North/Top)    -> BTN_WEST  (0x134, kernel BTN_Y -> Steam Y)
+    let is_physical_map = (flags & 0x04) != 0;
 
-    let (btn_south, btn_east, btn_west, btn_north) = if is_physical_map {
+    let (btn_south, btn_east, btn_left, btn_top) = if is_physical_map {
         (
-            (buttons & (1 << 1)) != 0, // 3DS B -> South
-            (buttons & (1 << 0)) != 0, // 3DS A -> East
-            (buttons & (1 << 11)) != 0, // 3DS Y -> West
-            (buttons & (1 << 10)) != 0, // 3DS X -> North
+            (buttons & (1 << 1)) != 0,  // 3DS B -> South (Bottom)
+            (buttons & (1 << 0)) != 0,  // 3DS A -> East (Right)
+            (buttons & (1 << 11)) != 0, // 3DS Y -> Left (Steam X)
+            (buttons & (1 << 10)) != 0, // 3DS X -> Top (Steam Y)
         )
     } else {
         (
-            (buttons & (1 << 0)) != 0, // 3DS A -> South
-            (buttons & (1 << 1)) != 0, // 3DS B -> East
-            (buttons & (1 << 10)) != 0, // 3DS X -> West
-            (buttons & (1 << 11)) != 0, // 3DS Y -> North
+            (buttons & (1 << 0)) != 0,  // 3DS A -> Letter A (Steam A)
+            (buttons & (1 << 1)) != 0,  // 3DS B -> Letter B (Steam B)
+            (buttons & (1 << 10)) != 0, // 3DS X -> Letter X (Steam X)
+            (buttons & (1 << 11)) != 0, // 3DS Y -> Letter Y (Steam Y)
         )
     };
 
     events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_SOUTH.0, if btn_south { 1 } else { 0 }));
-    events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_EAST.0, if btn_east { 1 } else { 0 }));
-    events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_WEST.0, if btn_west { 1 } else { 0 }));
-    events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_NORTH.0, if btn_north { 1 } else { 0 }));
+    events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_EAST.0,  if btn_east  { 1 } else { 0 }));
+    events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_NORTH.0, if btn_left  { 1 } else { 0 })); // 0x133 = Steam Left/X
+    events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_WEST.0,  if btn_top   { 1 } else { 0 })); // 0x134 = Steam Top/Y
 
     events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_TL.0, if (buttons & (1 << 9)) != 0 { 1 } else { 0 }));
     events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_TR.0, if (buttons & (1 << 8)) != 0 { 1 } else { 0 }));

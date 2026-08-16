@@ -24,22 +24,38 @@ SysMon is split into three parts:
 ### 1. PC Server (Linux)
 The server can be compiled into a native RPM package using `cargo-generate-rpm`. 
 
+**Standard Build (with Screen Streaming):**
 ```bash
 cd sysmon-server
 cargo build --release
 cargo generate-rpm
 sudo rpm -i target/generate-rpm/sysmon-server-*.rpm
 ```
-Alternatively, just run `cargo run --release` if you prefer not to install it system-wide.
+
+**Lightweight No-Cam Build (Telemetry & Macros Only):**
+```bash
+cd sysmon-server
+cargo build --release --no-default-features
+cargo generate-rpm --variant nocam
+sudo rpm -i target/generate-rpm/sysmon-server-nocam-*.rpm
+```
+Alternatively, just run `cargo run --release` (or `cargo run --release --no-default-features`) if you prefer not to install it system-wide.
 
 ### 2. Nintendo 3DS Client
 Requires `devkitARM` and `libctru` to be installed and available in your environment.
 
+**Standard Build (with CAM tab):**
 ```bash
 cd sysmon-3ds
 make cia
 ```
-Then, install the resulting `sysmon-3ds.cia` onto your Nintendo 3DS using FBI.
+
+**No-Cam Build:**
+```bash
+cd sysmon-3ds
+make cia-nocam
+```
+Then, install the resulting `.cia` (`sysmon-3ds.cia` or `sysmon-3ds-nocam.cia`) onto your Nintendo 3DS using FBI.
 
 ## Configuration & Web Dashboard
 The `sysmon-server` runs headlessly in your system tray so it doesn't get in your way. 

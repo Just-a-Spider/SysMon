@@ -120,10 +120,12 @@ void net_ctrl_send_tick(u32 buttons, s16 cx, s16 cy, s16 rx, s16 ry, u32 flags)
     pkt[26] = (u8)((final_flags >> 8)  & 0xFF);
     pkt[27] = (u8)(final_flags & 0xFF);
 
-    sendto(s_ctrl_sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&s_srv_addr, sizeof(s_srv_addr));
+    ssize_t sent = sendto(s_ctrl_sock, pkt, sizeof(pkt), MSG_DONTWAIT, (struct sockaddr *)&s_srv_addr, sizeof(s_srv_addr));
 
-    // Rate counter calculation
-    s_packets_this_sec++;
+    // Rate counter calculation (only increment if packet went to network interface)
+    if (sent > 0)
+        s_packets_this_sec++;
+
     u64 now = osGetTime();
     if (now - s_last_rate_time >= 1000)
     {

@@ -246,11 +246,17 @@ static void parse_macros(const char *json)
 
 static void net_thread_func(void *arg)
 {
+    extern int g_screen_mode;
     while (g_net_running)
     {
-        if (!g_fetching_enabled)
+        if (!g_fetching_enabled || g_screen_mode == 7)
         {
-            svcSleepThread(500 * 1000000LL);
+            if (g_socket >= 0)
+            {
+                close(g_socket);
+                g_socket = -1;
+            }
+            svcSleepThread(100 * 1000000LL);
             continue;
         }
 
@@ -289,7 +295,7 @@ static void net_thread_func(void *arg)
         memset(buf, 0, sizeof(buf));
         int total_len = 0;
 
-        while (g_net_running && g_fetching_enabled)
+        while (g_net_running && g_fetching_enabled && g_screen_mode != 7)
         {
             int recvd = recv(g_socket, buf + total_len, sizeof(buf) - total_len - 1, 0);
 
@@ -383,7 +389,7 @@ void network_send_json(const char *json_str)
     LightLock_Lock(&send_lock);
     char buf[1024];
     snprintf(buf, sizeof(buf), "%s\n", json_str);
-    send(g_socket, buf, strlen(buf), 0);
+    send(g_socket, buf, strlen(buf), MSG_DONTWAIT);
     LightLock_Unlock(&send_lock);
 }
 

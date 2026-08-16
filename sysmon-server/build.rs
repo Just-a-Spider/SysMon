@@ -1,10 +1,10 @@
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-
 fn main() {
+    #[cfg(feature = "cam")]
     #[cfg(target_os = "linux")]
     {
+        use std::env;
+        use std::fs;
+        use std::path::{Path, PathBuf};
         let search_dirs = [
             "/usr/lib64",
             "/lib64",

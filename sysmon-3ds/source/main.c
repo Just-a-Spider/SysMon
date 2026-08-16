@@ -35,6 +35,8 @@ float g_ctrl_emergency_progress = 0.0f;
 int g_ctrl_touch_active = 0;
 float g_ctrl_touch_rx = 220.0f, g_ctrl_touch_ry = 130.0f;
 static u64 s_emergency_hold_start = 0;
+static bool s_is_n3ds = false;
+static bool s_irrst_inited = false;
 
 // Frame throttle (~20 fps)
 static u64 g_last_draw_time = 0;
@@ -192,7 +194,14 @@ int main(void)
     gfxInitDefault();
     romfsInit();
     ptmuInit();
-    irrstInit();
+
+    APT_CheckNew3DS(&s_is_n3ds);
+    if (s_is_n3ds)
+    {
+        Result r = irrstInit();
+        if (R_SUCCEEDED(r))
+            s_irrst_inited = true;
+    }
 
     load_pomodoro_config();
     g_pomodoro_seconds = current_pomodoro_minutes() * 60;
@@ -229,6 +238,9 @@ int main(void)
     while (aptMainLoop())
     {
         hidScanInput();
+        if (s_irrst_inited)
+            irrstScanInput();
+
         u32 kDown = hidKeysDown();
         u32 kUp   = hidKeysUp();
         if ((kDown & KEY_START) && g_screen_mode != 7) break;
@@ -844,10 +856,14 @@ int main(void)
             g_ctrl_cx = (s16)clamp_int((int)circlePos.dx * 215, -32767, 32767);
             g_ctrl_cy = (s16)clamp_int((int)circlePos.dy * 215, -32767, 32767);
 
-            // Read New 3DS C-Stick
+            // Read New 3DS C-Stick (only if hardware supported and inited)
             circlePosition cstickPos = {0, 0};
-            irrstCstickRead(&cstickPos);
-            int cstick_active = (abs((int)cstickPos.dx) > 15 || abs((int)cstickPos.dy) > 15);
+            int cstick_active = 0;
+            if (s_irrst_inited)
+            {
+                irrstCstickRead(&cstickPos);
+                cstick_active = (abs((int)cstickPos.dx) > 15 || abs((int)cstickPos.dy) > 15);
+            }
 
             u32 flags = 0;
             if (cstick_active)
@@ -937,7 +953,8 @@ int main(void)
 
     audio_exit();
     graphics_exit();
-    irrstExit();
+    if (s_irrst_inited)
+        irrstExit();
     ptmuExit();
     network_exit();
     romfsExit();

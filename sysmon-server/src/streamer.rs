@@ -1,11 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicUsize, Ordering};
-use std::time::Duration;
-use std::os::fd::{AsRawFd, OwnedFd};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use xcap::Monitor;
-use image::imageops::FilterType;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicUsize};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,22 +21,81 @@ pub struct StreamStatus {
     pub zoom: u8,
 }
 
-pub struct StreamerState {
-    pub stream_port: AtomicU16,
-    pub is_sharing_enabled: AtomicBool, // Default false: Standby until user picks source
-    pub is_active: AtomicBool,
-    pub source_idx: AtomicUsize,
-    pub source_version: AtomicU32,
-    pub active_pw_node: AtomicU32,
-    pub active_pw_fd: std::sync::Mutex<Option<OwnedFd>>,
-    pub active_source_name: std::sync::Mutex<String>,
-    pub mode: AtomicU8, // 0 = Bottom Tab (240x160), 1 = Top Screen (400x240)
-    pub zoom: AtomicU8, // 0 = Fit (Area Averaged), 1 = 1:1 Native Pixel Crop
-    pub format: AtomicU8, // 0 = RGB565, 1 = JPEG, 2 = Standby
-    pub portal_session: tokio::sync::Mutex<Option<ashpd::desktop::Session<ashpd::desktop::screencast::Screencast>>>,
+#[cfg(not(feature = "cam"))]
+mod imp {
+    use super::*;
+
+    pub struct StreamerState {
+        pub stream_port: AtomicU16,
+        pub is_sharing_enabled: AtomicBool,
+        pub is_active: AtomicBool,
+        pub source_idx: AtomicUsize,
+        pub source_version: AtomicU32,
+        pub active_pw_node: AtomicU32,
+        pub active_source_name: std::sync::Mutex<String>,
+        pub mode: AtomicU8,
+        pub zoom: AtomicU8,
+        pub format: AtomicU8,
+    }
+
+    impl StreamerState {
+        pub fn new(default_port: u16) -> Self {
+            Self {
+                stream_port: AtomicU16::new(default_port),
+                is_sharing_enabled: AtomicBool::new(false),
+                is_active: AtomicBool::new(false),
+                source_idx: AtomicUsize::new(0),
+                source_version: AtomicU32::new(1),
+                active_pw_node: AtomicU32::new(0),
+                active_source_name: std::sync::Mutex::new("Disabled (No-Cam build)".to_string()),
+                mode: AtomicU8::new(0),
+                zoom: AtomicU8::new(0),
+                format: AtomicU8::new(0),
+            }
+        }
+    }
+
+    pub async fn trigger_os_screencast_picker(_state: Arc<StreamerState>) -> Result<String, String> {
+        Err("Screen streaming is disabled in this server build.".to_string())
+    }
+
+    pub fn list_sources() -> Vec<StreamSource> {
+        Vec::new()
+    }
+
+    #[allow(dead_code)]
+    pub async fn run_streamer(_state: Arc<StreamerState>, _preferred_port: u16) {
+        // No-op for nocam build
+    }
 }
 
-impl StreamerState {
+#[cfg(feature = "cam")]
+mod imp {
+    use super::*;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use std::os::fd::{AsRawFd, OwnedFd};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use xcap::Monitor;
+    use image::imageops::FilterType;
+
+    pub struct StreamerState {
+        pub stream_port: AtomicU16,
+        pub is_sharing_enabled: AtomicBool, // Default false: Standby until user picks source
+        pub is_active: AtomicBool,
+        pub source_idx: AtomicUsize,
+        pub source_version: AtomicU32,
+        pub active_pw_node: AtomicU32,
+        pub active_pw_fd: std::sync::Mutex<Option<OwnedFd>>,
+        pub active_source_name: std::sync::Mutex<String>,
+        pub mode: AtomicU8, // 0 = Bottom Tab (240x160), 1 = Top Screen (400x240)
+        pub zoom: AtomicU8, // 0 = Fit (Area Averaged), 1 = 1:1 Native Pixel Crop
+        pub format: AtomicU8, // 0 = RGB565, 1 = JPEG, 2 = Standby
+        pub portal_session: tokio::sync::Mutex<Option<ashpd::desktop::Session<ashpd::desktop::screencast::Screencast>>>,
+    }
+
+    impl StreamerState {
     pub fn new(default_port: u16) -> Self {
         let sources = list_sources();
         let default_name = sources.first().map(|s| s.name.clone()).unwrap_or_else(|| "Display 1".to_string());
@@ -711,7 +764,7 @@ fn capture_and_process(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cam"))]
 mod tests {
     use super::*;
 
@@ -777,3 +830,7 @@ mod tests {
         }
     }
 }
+}
+
+pub use imp::*;
+

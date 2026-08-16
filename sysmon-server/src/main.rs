@@ -140,6 +140,7 @@ fn main() {
     
     // We need to keep this thread alive, and we must clone the state to pass to web server
     let web_state = state.clone();
+    #[cfg(feature = "cam")]
     let streamer_state_clone = streamer_state.clone();
     let streamer_app_state = state.clone();
 
@@ -152,25 +153,28 @@ fn main() {
                 web_api::run_web_server(web_state, web_port).await;
             });
 
-            // Spawn the screen streamer server
-            let stream_port = streamer_app_state.lock().await.config.stream_port;
-            let streamer_st = streamer_state_clone.clone();
-            let st_app = streamer_app_state.clone();
-            tokio::spawn(async move {
-                let st_clone = streamer_st.clone();
-                let bind_task = tokio::spawn(async move {
-                    streamer::run_streamer(st_clone, stream_port).await;
+            // Spawn the screen streamer server (if cam feature enabled)
+            #[cfg(feature = "cam")]
+            {
+                let stream_port = streamer_app_state.lock().await.config.stream_port;
+                let streamer_st = streamer_state_clone.clone();
+                let st_app = streamer_app_state.clone();
+                tokio::spawn(async move {
+                    let st_clone = streamer_st.clone();
+                    let bind_task = tokio::spawn(async move {
+                        streamer::run_streamer(st_clone, stream_port).await;
+                    });
+                    
+                    // Wait briefly for port binding, then sync active_stream_port
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    let actual_port = streamer_st.stream_port.load(std::sync::atomic::Ordering::SeqCst);
+                    {
+                        let mut s = st_app.lock().await;
+                        s.active_stream_port = actual_port;
+                    }
+                    let _ = bind_task.await;
                 });
-                
-                // Wait briefly for port binding, then sync active_stream_port
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                let actual_port = streamer_st.stream_port.load(std::sync::atomic::Ordering::SeqCst);
-                {
-                    let mut s = st_app.lock().await;
-                    s.active_stream_port = actual_port;
-                }
-                let _ = bind_task.await;
-            });
+            }
 
             // Spawn the UDP Controller server (port 7339)
             let (ctrl_port, ctrl_pin) = {
@@ -218,27 +222,39 @@ fn main() {
     let event_loop = EventLoopBuilder::new().build();
 
     let tray_menu = Menu::new();
+    #[cfg(feature = "cam")]
     let status_i = MenuItem::new("○ Stream: STANDBY", false, None);
+    #[cfg(feature = "cam")]
     let source_i = MenuItem::new("📺 Source: None Selected", false, None);
+    #[cfg(feature = "cam")]
     let pick_os_i = MenuItem::new("🖥️ Choose Window / Screen (OS Dialog)...", true, None);
+    #[cfg(feature = "cam")]
     let toggle_stream_i = MenuItem::new("▶️ Start Screen Sharing", true, None);
+    #[cfg(feature = "cam")]
     let zoom_i = MenuItem::new("🔍 Zoom: FIT (Triangle)", true, None);
+    #[cfg(feature = "cam")]
     let next_src_i = MenuItem::new("Stream: Next Monitor", true, None);
+    #[cfg(feature = "cam")]
     let prev_src_i = MenuItem::new("Stream: Prev Monitor", true, None);
+
     let web_i = MenuItem::new("Open Web Config", true, None);
     let start_i = MenuItem::new("Start Server", true, None);
     let stop_i = MenuItem::new("Stop Server", true, None);
     let quit_i = MenuItem::new("Quit", true, None);
     
-    let _ = tray_menu.append(&status_i);
-    let _ = tray_menu.append(&source_i);
-    let _ = tray_menu.append(&PredefinedMenuItem::separator());
-    let _ = tray_menu.append(&pick_os_i);
-    let _ = tray_menu.append(&toggle_stream_i);
-    let _ = tray_menu.append(&zoom_i);
-    let _ = tray_menu.append(&next_src_i);
-    let _ = tray_menu.append(&prev_src_i);
-    let _ = tray_menu.append(&PredefinedMenuItem::separator());
+    #[cfg(feature = "cam")]
+    {
+        let _ = tray_menu.append(&status_i);
+        let _ = tray_menu.append(&source_i);
+        let _ = tray_menu.append(&PredefinedMenuItem::separator());
+        let _ = tray_menu.append(&pick_os_i);
+        let _ = tray_menu.append(&toggle_stream_i);
+        let _ = tray_menu.append(&zoom_i);
+        let _ = tray_menu.append(&next_src_i);
+        let _ = tray_menu.append(&prev_src_i);
+        let _ = tray_menu.append(&PredefinedMenuItem::separator());
+    }
+
     let _ = tray_menu.append(&web_i);
     let _ = tray_menu.append(&start_i);
     let _ = tray_menu.append(&stop_i);
@@ -255,13 +271,16 @@ fn main() {
     let menu_channel = MenuEvent::receiver();
     let _tray_channel = TrayIconEvent::receiver();
 
+    #[cfg(feature = "cam")]
     let tray_streamer = streamer_state.clone();
+    #[cfg(feature = "cam")]
     let mut last_tray_update = std::time::Instant::now();
 
     event_loop.run(move |_, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_millis(100));
 
-        // Periodic dynamic tray update (every 250ms)
+        // Periodic dynamic tray update (every 250ms, if cam enabled)
+        #[cfg(feature = "cam")]
         if last_tray_update.elapsed() >= std::time::Duration::from_millis(250) {
             last_tray_update = std::time::Instant::now();
             let is_sharing = tray_streamer.is_sharing_enabled.load(std::sync::atomic::Ordering::SeqCst);
@@ -307,44 +326,48 @@ fn main() {
                 state.blocking_lock().is_server_running = true;
             } else if event.id == stop_i.id() {
                 state.blocking_lock().is_server_running = false;
-            } else if event.id == pick_os_i.id() {
-                let st_pick = tray_streamer.clone();
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async {
-                        let _ = streamer::trigger_os_screencast_picker(st_pick).await;
+            }
+            #[cfg(feature = "cam")]
+            {
+                if event.id == pick_os_i.id() {
+                    let st_pick = tray_streamer.clone();
+                    std::thread::spawn(move || {
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async {
+                            let _ = streamer::trigger_os_screencast_picker(st_pick).await;
+                        });
                     });
-                });
-            } else if event.id == toggle_stream_i.id() {
-                let cur = tray_streamer.is_sharing_enabled.load(std::sync::atomic::Ordering::SeqCst);
-                tray_streamer.is_sharing_enabled.store(!cur, std::sync::atomic::Ordering::SeqCst);
-            } else if event.id == next_src_i.id() {
-                tray_streamer.active_pw_node.store(0, std::sync::atomic::Ordering::SeqCst);
-                let count = streamer::list_sources().len().max(1);
-                let cur = tray_streamer.source_idx.load(std::sync::atomic::Ordering::SeqCst);
-                let next_idx = (cur + 1) % count;
-                tray_streamer.source_idx.store(next_idx, std::sync::atomic::Ordering::SeqCst);
-                let sources = streamer::list_sources();
-                if let Ok(mut name) = tray_streamer.active_source_name.lock() {
-                    *name = sources.get(next_idx).map(|s| s.name.clone()).unwrap_or_else(|| format!("Display {}", next_idx + 1));
+                } else if event.id == toggle_stream_i.id() {
+                    let cur = tray_streamer.is_sharing_enabled.load(std::sync::atomic::Ordering::SeqCst);
+                    tray_streamer.is_sharing_enabled.store(!cur, std::sync::atomic::Ordering::SeqCst);
+                } else if event.id == next_src_i.id() {
+                    tray_streamer.active_pw_node.store(0, std::sync::atomic::Ordering::SeqCst);
+                    let count = streamer::list_sources().len().max(1);
+                    let cur = tray_streamer.source_idx.load(std::sync::atomic::Ordering::SeqCst);
+                    let next_idx = (cur + 1) % count;
+                    tray_streamer.source_idx.store(next_idx, std::sync::atomic::Ordering::SeqCst);
+                    let sources = streamer::list_sources();
+                    if let Ok(mut name) = tray_streamer.active_source_name.lock() {
+                        *name = sources.get(next_idx).map(|s| s.name.clone()).unwrap_or_else(|| format!("Display {}", next_idx + 1));
+                    }
+                    tray_streamer.is_sharing_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+                    tray_streamer.source_version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                } else if event.id == prev_src_i.id() {
+                    tray_streamer.active_pw_node.store(0, std::sync::atomic::Ordering::SeqCst);
+                    let count = streamer::list_sources().len().max(1);
+                    let cur = tray_streamer.source_idx.load(std::sync::atomic::Ordering::SeqCst);
+                    let prev_idx = if cur == 0 { count - 1 } else { cur - 1 };
+                    tray_streamer.source_idx.store(prev_idx, std::sync::atomic::Ordering::SeqCst);
+                    let sources = streamer::list_sources();
+                    if let Ok(mut name) = tray_streamer.active_source_name.lock() {
+                        *name = sources.get(prev_idx).map(|s| s.name.clone()).unwrap_or_else(|| format!("Display {}", prev_idx + 1));
+                    }
+                    tray_streamer.is_sharing_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+                    tray_streamer.source_version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                } else if event.id == zoom_i.id() {
+                    let cur = tray_streamer.zoom.load(std::sync::atomic::Ordering::SeqCst);
+                    tray_streamer.zoom.store(if cur == 0 { 1 } else { 0 }, std::sync::atomic::Ordering::SeqCst);
                 }
-                tray_streamer.is_sharing_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
-                tray_streamer.source_version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            } else if event.id == prev_src_i.id() {
-                tray_streamer.active_pw_node.store(0, std::sync::atomic::Ordering::SeqCst);
-                let count = streamer::list_sources().len().max(1);
-                let cur = tray_streamer.source_idx.load(std::sync::atomic::Ordering::SeqCst);
-                let prev_idx = if cur == 0 { count - 1 } else { cur - 1 };
-                tray_streamer.source_idx.store(prev_idx, std::sync::atomic::Ordering::SeqCst);
-                let sources = streamer::list_sources();
-                if let Ok(mut name) = tray_streamer.active_source_name.lock() {
-                    *name = sources.get(prev_idx).map(|s| s.name.clone()).unwrap_or_else(|| format!("Display {}", prev_idx + 1));
-                }
-                tray_streamer.is_sharing_enabled.store(true, std::sync::atomic::Ordering::SeqCst);
-                tray_streamer.source_version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            } else if event.id == zoom_i.id() {
-                let cur = tray_streamer.zoom.load(std::sync::atomic::Ordering::SeqCst);
-                tray_streamer.zoom.store(if cur == 0 { 1 } else { 0 }, std::sync::atomic::Ordering::SeqCst);
             }
         }
     });

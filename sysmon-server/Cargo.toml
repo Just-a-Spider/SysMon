@@ -1,9 +1,13 @@
 [package]
 name = "sysmon-server"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "MIT"
 description = "SysMon Server for Nintendo 3DS Companion"
+[features]
+default = ["cam"]
+cam = ["dep:xcap", "dep:ashpd", "dep:x11rb", "dep:libc"]
+
 [dependencies]
 axum = "0.8.9"
 open = "5.3"
@@ -19,11 +23,12 @@ serde_json = "1.0.151"
 sysinfo = "0.38.4"
 tokio = { version = "1.53.1", features = ["full"] }
 tray-icon = "0.24.1"
-xcap = "0.9.8"
-x11rb = { version = "0.14.0", features = ["allow-unsafe-code"] }
-ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast"] }
-libc = "0.2"
+xcap = { version = "0.9.8", optional = true }
+x11rb = { version = "0.14.0", features = ["allow-unsafe-code"], optional = true }
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast"], optional = true }
+libc = { version = "0.2", optional = true }
 evdev = "0.13"
+
 [package.metadata.generate-rpm]
 assets = [
     { source = "target/release/sysmon-server", dest = "/usr/bin/sysmon-server", mode = "755" },
@@ -31,3 +36,14 @@ assets = [
     { source = "packaging/99-sysmon-uinput.rules", dest = "/usr/lib/udev/rules.d/99-sysmon-uinput.rules", mode = "644" },
     { source = "../sysmon-3ds/icon.png", dest = "/usr/share/icons/hicolor/512x512/apps/sysmon-server.png", mode = "644" }
 ]
+
+[package.metadata.generate-rpm.variants.nocam]
+name = "sysmon-server-nocam"
+summary = "SysMon Server for Nintendo 3DS Companion (No-Cam lightweight build)"
+assets = [
+    { source = "target/release/sysmon-server", dest = "/usr/bin/sysmon-server", mode = "755" },
+    { source = "packaging/sysmon-server.desktop", dest = "/usr/share/applications/sysmon-server.desktop", mode = "644" },
+    { source = "packaging/99-sysmon-uinput.rules", dest = "/usr/lib/udev/rules.d/99-sysmon-uinput.rules", mode = "644" },
+    { source = "../sysmon-3ds/icon.png", dest = "/usr/share/icons/hicolor/512x512/apps/sysmon-server.png", mode = "644" }
+]
+
