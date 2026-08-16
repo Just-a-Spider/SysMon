@@ -7,31 +7,24 @@ $(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to>dev
 endif
 
 TOPDIR ?= $(CURDIR)
+
+ifeq ($(MAKECMDGOALS),nocam)
+	override ENABLE_CAM := 0
+endif
+
+ifeq ($(ENABLE_CAM),0)
+	TARGET := sysmon-3ds-nocam
+	CFLAGS += -DDISABLE_CAM=1
+else
+	override ENABLE_CAM := 1
+	TARGET := sysmon-3ds
+endif
+
+export TARGET
+export ENABLE_CAM
+
 include $(DEVKITARM)/3ds_rules
 
-#---------------------------------------------------------------------------------
-# TARGET is the name of the output
-# BUILD is the directory where object files & intermediate files will be placed
-# SOURCES is a list of directories containing source code
-# DATA is a list of directories containing data files
-# INCLUDES is a list of directories containing header files
-# GRAPHICS is a list of directories containing graphics files
-# GFXBUILD is the directory where converted graphics files will be placed
-#   If set to $(BUILD), it will statically link in the converted
-#   files as if they were data files.
-#
-# NO_SMDH: if set to anything, no SMDH file is generated.
-# ROMFS is the directory which contains the RomFS, relative to the Makefile (Optional)
-# APP_TITLE is the name of the app stored in the SMDH file (Optional)
-# APP_DESCRIPTION is the description of the app stored in the SMDH file (Optional)
-# APP_AUTHOR is the author of the app stored in the SMDH file (Optional)
-# ICON is the filename of the icon (.png), relative to the project folder.
-#   If not set, it attempts to use one of the following (in this order):
-#     - <Project name>.png
-#     - icon.png
-#     - <libctru folder>/default_icon.png
-#---------------------------------------------------------------------------------
-TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
@@ -51,6 +44,10 @@ CFLAGS	:=	-g -Wall -O3 -mword-relocations \
 			$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -D__3DS__
+
+ifeq ($(ENABLE_CAM),0)
+	CFLAGS += -DDISABLE_CAM=1
+endif
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 
@@ -158,17 +155,40 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean
+.PHONY: all clean nocam cia cia-nocam
+
+# GNU Make picks the default goal (what bare `make` runs) as the target of
+# the first non-".*" rule textually in the file. Since `nocam:` is defined
+# before `all:` below, without this line a bare `make` would silently build
+# the nocam variant instead of the full CAM build. Setting this explicitly
+# makes the intended default correct regardless of rule ordering.
+.DEFAULT_GOAL := all
+
+nocam:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory all ENABLE_CAM=0
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile ENABLE_CAM=$(ENABLE_CAM)
 
-cia: $(OUTPUT).elf
+# cia depends on `all` (rather than just $(OUTPUT).elf) so `make cia` works
+# standalone from a clean tree instead of silently failing when no prior
+# `make` has been run. TARGET/OUTPUT already resolve correctly for whichever
+# ENABLE_CAM value is active, so this produces sysmon-3ds.cia by default.
+cia: all
 	./tools/bannertool makebanner -i banner.png -a assets/audio.wav -o banner.bin
 	./tools/bannertool makesmdh -s "SysMon" -l "Hardware Companion" -p "Just-a-Spider" -i icon.png -o icon.bin
 	./tools/makerom -f cia -o $(TARGET).cia -elf $(OUTPUT).elf -rsf assets/app.rsf -icon icon.bin -banner banner.bin -exefslogo -desc app:7
 	@echo "CIA BUILD COMPLETE: $(TARGET).cia"
+
+# cia-nocam: same packaging step as `cia`, but forces ENABLE_CAM=0 through a
+# clean rebuild first (mirrors the `nocam` target) so TARGET resolves to
+# sysmon-3ds-nocam and the .cia doesn't end up mixing object files built
+# against the wrong ENABLE_CAM setting.
+cia-nocam:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory cia ENABLE_CAM=0
 
 $(BUILD):
 	@mkdir -p $@
@@ -186,7 +206,10 @@ endif
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD)
+	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
+		sysmon-3ds.3dsx sysmon-3ds.smdh sysmon-3ds.elf sysmon-3ds.cia \
+		sysmon-3ds-nocam.3dsx sysmon-3ds-nocam.smdh sysmon-3ds-nocam.elf sysmon-3ds-nocam.cia \
+		banner.bin icon.bin $(GFXBUILD)
 
 #---------------------------------------------------------------------------------
 $(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s

@@ -76,6 +76,16 @@ void graphics_draw_level_tab(void);
 void graphics_draw_kill_tab(void);
 void graphics_draw_macro_tab(void);
 void graphics_draw_media_tab(void);
+#ifndef DISABLE_CAM
+void graphics_draw_cam_tab(void);
+void graphics_draw_top_screen_cam(void);
+void graphics_cam_init(void);
+void graphics_cam_exit(void);
+void graphics_cam_update_frame(const u16 *rgb565, int width, int height);
+void graphics_cam_update_delta_tiles(const u8 *tile_payload, u16 tile_count, int width, int height);
+#endif
+void graphics_draw_ctrl_tab(float emergency_exit_progress, int touch_active, float touch_rx, float touch_ry);
+void graphics_draw_top_screen_ctrl(u32 held, s16 cx, s16 cy, s16 rx, s16 ry);
 
 // SET tab — three sub-views (dispatched by graphics_draw_frame based on g_set_sub)
 // set_row: 0=THEME 1=SERVER

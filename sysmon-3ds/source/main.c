@@ -1,11 +1,14 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <math.h>
 #include <3ds.h>
 #include <3ds/services/ptmu.h>
+#include <3ds/services/irrst.h>
 
 #include "network.h"
+#include "net_ctrl.h"
 #include "graphics.h"
 #include "input.h"
 #include "audio.h"
@@ -24,11 +27,19 @@ int g_pomodoro_seconds        = 25 * 60;
 int g_pomodoro_active         = 0;
 int g_selected_proc      = 0;
 
+// Controller state
+u32 g_ctrl_held_keys = 0;
+s16 g_ctrl_cx = 0, g_ctrl_cy = 0;
+s16 g_ctrl_rx = 0, g_ctrl_ry = 0;
+float g_ctrl_emergency_progress = 0.0f;
+int g_ctrl_touch_active = 0;
+float g_ctrl_touch_rx = 220.0f, g_ctrl_touch_ry = 130.0f;
+static u64 s_emergency_hold_start = 0;
+
 // Frame throttle (~20 fps)
 static u64 g_last_draw_time = 0;
 #define FRAME_INTERVAL_MS 50
 
-u64 g_last_level_touch_time  = 0;
 static u64 g_last_level_send_time = 0;
 static u64 last_btn_time          = 0;
 
@@ -177,9 +188,11 @@ static void set_revert_preview(void)
 // ---------------------------------------------------------------------------
 int main(void)
 {
+    osSetSpeedupEnable(true); // Unlock 804MHz CPU + L2 Cache on New 3DS
     gfxInitDefault();
     romfsInit();
     ptmuInit();
+    irrstInit();
 
     load_pomodoro_config();
     g_pomodoro_seconds = current_pomodoro_minutes() * 60;
@@ -218,7 +231,7 @@ int main(void)
         hidScanInput();
         u32 kDown = hidKeysDown();
         u32 kUp   = hidKeysUp();
-        if (kDown & KEY_START) break;
+        if ((kDown & KEY_START) && g_screen_mode != 7) break;
 
         touchPosition touch;
         hidTouchRead(&touch);
@@ -238,7 +251,15 @@ int main(void)
             {
                 // Leaving SET: revert live theme preview if not applied
                 if (g_screen_mode == 4) set_revert_preview();
+#ifndef DISABLE_CAM
+                if (g_screen_mode == 6 && !g_cam_top_screen) network_cam_stop();
+#endif
+                if (g_screen_mode == 7) net_ctrl_stop();
                 g_screen_mode = hit;
+#ifndef DISABLE_CAM
+                if (g_screen_mode == 6) { network_cam_start(); network_cam_send_cmd('B'); }
+#endif
+                if (g_screen_mode == 7) { net_ctrl_start(g_profiles[g_profile_index].ip, g_ctrl_port); }
                 audio_play_click();
             }
         }
@@ -712,6 +733,166 @@ int main(void)
                 }
             }
         }
+#ifndef DISABLE_CAM
+        // ---- CAM (mode 6) ----
+        else if (g_screen_mode == 6)
+        {
+            if (kDown & KEY_X)
+            {
+                g_cam_top_screen = !g_cam_top_screen;
+                if (g_cam_top_screen)
+                {
+                    network_cam_send_cmd('T');
+                }
+                else
+                {
+                    network_cam_send_cmd('B');
+                }
+                audio_play_click();
+            }
+            if ((kDown & KEY_L) || (kDown & KEY_DLEFT))
+            {
+                network_cam_send_cmd('P');
+                if (g_cam_monitor_idx > 0) g_cam_monitor_idx--;
+                else g_cam_monitor_idx = 7;
+                audio_play_click();
+            }
+            if ((kDown & KEY_R) || (kDown & KEY_DRIGHT))
+            {
+                network_cam_send_cmd('N');
+                g_cam_monitor_idx = (g_cam_monitor_idx + 1) % 8;
+                audio_play_click();
+            }
+            if (kDown & KEY_A)
+            {
+                network_cam_send_cmd('Z');
+                g_cam_zoom_mode = !g_cam_zoom_mode;
+                audio_play_click();
+            }
+            if (kDown & KEY_Y)
+            {
+                network_cam_send_cmd('O');
+                audio_play_click();
+            }
+            if ((kDown & KEY_TOUCH) && touch.px < 260 && touch.py < 180)
+            {
+                g_cam_top_screen = !g_cam_top_screen;
+                if (g_cam_top_screen)
+                {
+                    network_cam_send_cmd('T');
+                }
+                else
+                {
+                    network_cam_send_cmd('B');
+                }
+                audio_play_click();
+            }
+        }
+
+        // Global top screen swap return
+        if (g_cam_top_screen && (kDown & KEY_X) && g_screen_mode != 6)
+        {
+            g_cam_top_screen = 0;
+            network_cam_stop();
+            audio_play_click();
+        }
+#endif
+        // ---- CONTROLLER (mode 7) ----
+        else if (g_screen_mode == 7)
+        {
+            // Touch button handling
+            if ((kDown & KEY_TOUCH) || (kHeld & KEY_TOUCH))
+            {
+                // Top Header: [ EXIT CONTROLLER ] button (x: 14..262, y: 10..48)
+                if (touch.py <= 50 && touch.px <= 262)
+                {
+                    g_screen_mode = 0;
+                    net_ctrl_stop();
+                    audio_play_click();
+                }
+                // Mapping toggle button (x: 14..124, y: 56..121)
+                else if ((kDown & KEY_TOUCH) && touch.px < 130 && touch.py >= 56 && touch.py <= 125)
+                {
+                    g_ctrl_physical_map = !g_ctrl_physical_map;
+                    audio_play_click();
+                }
+            }
+
+            // Virtual Right Stick Touch Area (x: 134..262, y: 56..215)
+            s16 touch_rx_val = 0;
+            s16 touch_ry_val = 0;
+            if ((kHeld & KEY_TOUCH) && touch.px >= 134 && touch.py >= 56)
+            {
+                g_ctrl_touch_active = 1;
+                g_ctrl_touch_rx = (float)touch.px;
+                g_ctrl_touch_ry = (float)touch.py;
+                float d_x = (float)touch.px - 220.0f;
+                float d_y = (float)touch.py - 130.0f;
+                touch_rx_val = (s16)clamp_int((int)(d_x * 780.0f), -32767, 32767);
+                touch_ry_val = (s16)clamp_int((int)(-d_y * 780.0f), -32767, 32767);
+            }
+            else
+            {
+                g_ctrl_touch_active = 0;
+                g_ctrl_touch_rx = 220.0f;
+                g_ctrl_touch_ry = 130.0f;
+            }
+
+            // Read hardware Circle Pad
+            circlePosition circlePos = {0, 0};
+            hidCircleRead(&circlePos);
+            g_ctrl_cx = (s16)clamp_int((int)circlePos.dx * 215, -32767, 32767);
+            g_ctrl_cy = (s16)clamp_int((int)circlePos.dy * 215, -32767, 32767);
+
+            // Read New 3DS C-Stick
+            circlePosition cstickPos = {0, 0};
+            irrstCstickRead(&cstickPos);
+            int cstick_active = (abs((int)cstickPos.dx) > 15 || abs((int)cstickPos.dy) > 15);
+
+            u32 flags = 0;
+            if (cstick_active)
+            {
+                flags |= 0x01; // C-Stick Active
+                g_ctrl_rx = (s16)clamp_int((int)cstickPos.dx * 215, -32767, 32767);
+                g_ctrl_ry = (s16)clamp_int((int)cstickPos.dy * 215, -32767, 32767);
+            }
+            else if (g_ctrl_touch_active)
+            {
+                flags |= 0x02; // Touch Active
+                g_ctrl_rx = touch_rx_val;
+                g_ctrl_ry = touch_ry_val;
+            }
+            else
+            {
+                g_ctrl_rx = 0;
+                g_ctrl_ry = 0;
+            }
+
+            // Emergency Exit Combo: Hold L + R + SELECT for 1 second
+            if ((kHeld & KEY_L) && (kHeld & KEY_R) && (kHeld & KEY_SELECT))
+            {
+                if (s_emergency_hold_start == 0) s_emergency_hold_start = now;
+                u64 held_ms = now - s_emergency_hold_start;
+                g_ctrl_emergency_progress = (float)held_ms / 1000.0f;
+                if (g_ctrl_emergency_progress >= 1.0f)
+                {
+                    g_screen_mode = 0;
+                    net_ctrl_stop();
+                    g_ctrl_emergency_progress = 0.0f;
+                    s_emergency_hold_start = 0;
+                    audio_play_confirm();
+                }
+            }
+            else
+            {
+                s_emergency_hold_start = 0;
+                g_ctrl_emergency_progress = 0.0f;
+            }
+
+            g_ctrl_held_keys = kHeld;
+            // 60 Hz UDP tick dispatch
+            net_ctrl_send_tick(kHeld, g_ctrl_cx, g_ctrl_cy, g_ctrl_rx, g_ctrl_ry, flags);
+        }
 
         // ----------------------------------------------------------------
         // Pomodoro timer tick
@@ -739,22 +920,24 @@ int main(void)
         else lastPomoTime = currentTime;
 
         // ----------------------------------------------------------------
-        // Frame throttle (~20 fps)
+        // Frame throttle (~20 fps for telemetry, ~60 fps for controller mode)
         // ----------------------------------------------------------------
         {
             u64 now_draw = osGetTime();
-            if (now_draw - g_last_draw_time >= FRAME_INTERVAL_MS)
+            u64 interval = (g_screen_mode == 7) ? 16 : FRAME_INTERVAL_MS;
+            if (now_draw - g_last_draw_time >= interval)
             {
                 g_last_draw_time = now_draw;
                 graphics_draw_frame(g_set_sub, g_set_row, g_preview_idx,
                                     g_editing, g_edit_field, g_edit_swatch);
             }
-            else svcSleepThread(5 * 1000000LL);
+            else svcSleepThread((g_screen_mode == 7 ? 2 : 5) * 1000000LL);
         }
     }
 
     audio_exit();
     graphics_exit();
+    irrstExit();
     ptmuExit();
     network_exit();
     romfsExit();

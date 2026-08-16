@@ -159,6 +159,27 @@
                 <input type="number" id="config-port">
             </div>
             <div class="form-group">
+                <label>Screen Stream Port (CAM Tab)</label>
+                <input type="number" id="config-stream-port" placeholder="7340">
+            </div>
+            <div class="form-group">
+                <label>Screen Sharing Controls (OS Dialog & Sources)</label>
+                <div style="display: flex; gap: 10px; margin-bottom: 8px;">
+                    <button type="button" onclick="triggerOsPicker()" style="background-color: var(--cyan-color); color: #000; font-weight: bold; flex: 1;">🖥️ Choose Screen / Window (OS Dialog)</button>
+                    <button type="button" onclick="toggleStreamSharing()" id="btn-toggle-stream" style="background-color: var(--accent-color); flex: 1;">Toggle Sharing</button>
+                </div>
+                <div style="background-color: #1a1a1a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 0.9em; margin-bottom: 8px;">
+                    <div>Sharing Enabled: <span id="stream-sharing-status" style="font-weight: bold; color: var(--accent-color);">Checking...</span></div>
+                    <div>3DS Receiver: <span id="stream-active-status" style="color: var(--text-dim);">Standby</span></div>
+                    <div>Active Source: <span id="stream-source-status" style="color: var(--cyan-color);">--</span></div>
+                </div>
+                <label>Quick Source Switcher</label>
+                <select id="config-stream-source" style="width: 100%; padding: 8px; background-color: #1e1e1e; border: 1px solid var(--border-color); color: white; border-radius: 4px;">
+                    <option value="0">Detecting sources...</option>
+                </select>
+                <small style="color: #888; margin-top: 4px; display: block;">You can also cycle sources live on 3DS using <b>L</b> and <b>R</b> shoulder buttons!</small>
+            </div>
+            <div class="form-group">
                 <label>Web Dashboard Port</label>
                 <input type="number" id="config-web-port">
             </div>
@@ -204,6 +225,7 @@
                 const cfg = await cfgRes.json();
                 document.getElementById('config-pin').value = cfg.pin;
                 document.getElementById('config-port').value = cfg.port;
+                document.getElementById('config-stream-port').value = cfg.stream_port || 7340;
                 document.getElementById('config-web-port').value = cfg.web_port;
                 document.getElementById('config-interval').value = cfg.update_interval_ms;
                 document.getElementById('config-sort-ram').checked = cfg.sort_by_ram || false;
@@ -211,6 +233,21 @@
                 const macRes = await fetch('/api/macros');
                 macros = await macRes.json();
                 renderMacros();
+
+                try {
+                    const srcRes = await fetch('/api/stream/sources');
+                    const sources = await srcRes.json();
+                    const srcSelect = document.getElementById('config-stream-source');
+                    srcSelect.innerHTML = '';
+                    sources.forEach((s, idx) => {
+                        const opt = document.createElement('option');
+                        opt.value = idx;
+                        opt.textContent = `[${s.kind.toUpperCase()}] ${s.name} (${s.width}x${s.height})`;
+                        srcSelect.appendChild(opt);
+                    });
+                } catch (err) {
+                    console.error("Failed to load stream sources", err);
+                }
             } catch (e) {
                 console.error("Failed to load data", e);
                 alert("Failed to connect to SysMon server.");
@@ -260,6 +297,7 @@
             const cfg = {
                 pin: document.getElementById('config-pin').value,
                 port: parseInt(document.getElementById('config-port').value),
+                stream_port: parseInt(document.getElementById('config-stream-port').value) || 7340,
                 web_port: parseInt(document.getElementById('config-web-port').value),
                 update_interval_ms: parseInt(document.getElementById('config-interval').value),
                 sort_by_ram: document.getElementById('config-sort-ram').checked
@@ -281,6 +319,63 @@
             });
             alert("Macros saved instantly.");
         }
+
+        async function triggerOsPicker() {
+            try {
+                const res = await fetch('/api/stream/picker');
+                const msg = await res.json();
+                console.log("OS Screen Share Dialog triggered:", msg);
+                const srcEl = document.getElementById('stream-source-status');
+                if (srcEl) srcEl.textContent = msg;
+                const sRes = await fetch('/api/stream/status');
+                if (sRes.ok) {
+                    const st = await sRes.json();
+                    updateStreamStatusUI(st);
+                }
+            } catch (e) {
+                console.error("Error triggering OS dialog:", e);
+            }
+        }
+
+        async function toggleStreamSharing() {
+            try {
+                const res = await fetch('/api/stream/toggle');
+                const isEnabled = await res.json();
+                updateStreamStatusUI(isEnabled);
+            } catch (e) {
+                console.error("Failed to toggle stream", e);
+            }
+        }
+
+        function updateStreamStatusUI(status) {
+            const sharingEl = document.getElementById('stream-sharing-status');
+            const activeEl = document.getElementById('stream-active-status');
+            const srcEl = document.getElementById('stream-source-status');
+            const btnEl = document.getElementById('btn-toggle-stream');
+
+            if (typeof status === 'boolean') {
+                if (sharingEl) sharingEl.textContent = status ? 'ENABLED (Ready to stream)' : 'DISABLED (Standby)';
+                if (sharingEl) sharingEl.style.color = status ? '#4caf50' : '#f44336';
+                if (btnEl) btnEl.textContent = status ? 'Pause Sharing' : 'Enable Sharing';
+            } else if (status) {
+                if (sharingEl) sharingEl.textContent = status.is_sharing_enabled ? 'ENABLED (Ready to stream)' : 'DISABLED (Standby)';
+                if (sharingEl) sharingEl.style.color = status.is_sharing_enabled ? '#4caf50' : '#f44336';
+                if (activeEl) activeEl.textContent = status.is_active ? '● STREAMING (Sending to 3DS)' : 'Standby (Waiting for 3DS CAM tab)';
+                if (activeEl) activeEl.style.color = status.is_active ? '#4caf50' : '#888';
+                if (srcEl) srcEl.textContent = status.source_name || 'Primary Display';
+                if (btnEl) btnEl.textContent = status.is_sharing_enabled ? 'Pause Sharing' : 'Enable Sharing';
+            }
+        }
+
+        setInterval(async () => {
+            try {
+                const sRes = await fetch('/api/stream/status');
+                if (sRes.ok) {
+                    const st = await sRes.json();
+                    updateStreamStatusUI(st);
+                }
+            } catch (e) {}
+        }, 2000);
 
         setInterval(async () => {
             try {

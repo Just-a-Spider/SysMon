@@ -69,13 +69,24 @@ static u32 clrDanger;
 // Static texts
 static C2D_Text txt_cpu, txt_gpu, txt_history;
 static C2D_Text txt_pomo_tab, txt_kill_tab, txt_macro_tab, txt_media_tab, txt_set_tab;
-static C2D_Text txt_level_tab;
+#ifndef DISABLE_CAM
+static C2D_Text txt_level_tab, txt_cam_tab, txt_ctrl_tab;
+#else
+static C2D_Text txt_level_tab, txt_ctrl_tab;
+#endif
 
 typedef struct { int mode; const char *label; } TabEntry;
+#ifndef DISABLE_CAM
 static const TabEntry tabEntries[] = {
     {0, "POMO"}, {1, "KILL"}, {2, "MACRO"},
-    {3, "MEDIA"},{4, "SET"}, {5, "LEVEL"},
+    {3, "MEDIA"},{4, "SET"}, {5, "LEVEL"}, {6, "CAM"}, {7, "CTRL"},
 };
+#else
+static const TabEntry tabEntries[] = {
+    {0, "POMO"}, {1, "KILL"}, {2, "MACRO"},
+    {3, "MEDIA"},{4, "SET"}, {5, "LEVEL"}, {7, "CTRL"},
+};
+#endif
 
 #define TAB_DRAWER_NOSCROLL_MAX    7
 #define TAB_DRAWER_ARROW_ZONE      24.0f
@@ -271,10 +282,18 @@ void graphics_init(void)
     parse_static_text(&txt_media_tab, "MEDIA");
     parse_static_text(&txt_set_tab,   "SET");
     parse_static_text(&txt_level_tab, "LEVEL");
+#ifndef DISABLE_CAM
+    parse_static_text(&txt_cam_tab,   "CAM");
+    graphics_cam_init();
+#endif
+    parse_static_text(&txt_ctrl_tab,  "CTRL");
 }
 
 void graphics_exit(void)
 {
+#ifndef DISABLE_CAM
+    graphics_cam_exit();
+#endif
     if (customFont) C2D_FontFree(customFont);
     C2D_TextBufDelete(dynamicBuf);
     C2D_TextBufDelete(staticBuf);
@@ -330,6 +349,10 @@ static C2D_Text *tab_text_for_mode(int mode)
     case 3: return &txt_media_tab;
     case 4: return &txt_set_tab;
     case 5: return &txt_level_tab;
+#ifndef DISABLE_CAM
+    case 6: return &txt_cam_tab;
+#endif
+    case 7: return &txt_ctrl_tab;
     default: return &txt_pomo_tab;
     }
 }
@@ -348,6 +371,8 @@ static u32 tab_accent_for_mode(int mode)
     case 3: return clrCyan;
     case 4: return clrCyan;
     case 5: return clrAmber;
+    case 6: return clrCyan;
+    case 7: return clrAmber;
     default: return clrAmber;
     }
 }
@@ -582,35 +607,49 @@ void graphics_draw_frame(int set_sub, int set_row, int preview_idx,
         (s_colors.amber >> 16) & 0xFF,
         bracketAlpha);
 
+    char textStr[256];
+    C2D_Text textObj;
+
     // ============================= TOP SCREEN =============================
     C2D_TargetClear(top, clrBg);
     C2D_SceneBegin(top);
     C2D_TextBufClear(dynamicBuf);
 
-    char textStr[256];
-    C2D_Text textObj;
-
-    if (g_cpu_temp > 85.0f)
+    if (g_screen_mode == 7)
     {
-        u8 a = (u8)(40 + glow * 60);
-        u32 dng_a = C2D_Color32(
-            s_colors.danger & 0xFF,
-            (s_colors.danger >> 8)  & 0xFF,
-            (s_colors.danger >> 16) & 0xFF, a);
-        C2D_DrawRectSolid(0,   0,   0, 400, 6, dng_a);
-        C2D_DrawRectSolid(0, 234,   0, 400, 6, dng_a);
+        extern u32 g_ctrl_held_keys;
+        extern s16 g_ctrl_cx, g_ctrl_cy, g_ctrl_rx, g_ctrl_ry;
+        graphics_draw_top_screen_ctrl(g_ctrl_held_keys, g_ctrl_cx, g_ctrl_cy, g_ctrl_rx, g_ctrl_ry);
     }
+#ifndef DISABLE_CAM
+    else if (g_cam_top_screen)
+    {
+        graphics_draw_top_screen_cam();
+    }
+#endif
+    else
+    {
+        if (g_cpu_temp > 85.0f)
+        {
+            u8 a = (u8)(40 + glow * 60);
+            u32 dng_a = C2D_Color32(
+                s_colors.danger & 0xFF,
+                (s_colors.danger >> 8)  & 0xFF,
+                (s_colors.danger >> 16) & 0xFF, a);
+            C2D_DrawRectSolid(0,   0,   0, 400, 6, dng_a);
+            C2D_DrawRectSolid(0, 234,   0, 400, 6, dng_a);
+        }
 
-    draw_scanlines(0, 0, 400, 240, 4);
+        draw_scanlines(0, 0, 400, 240, 4);
 
-    draw_hud_panel(10,  10, 185, 90, clrPanel, clrAmber,     14);
-    draw_hud_panel(205, 10, 185, 90, clrPanel, clrCyan,      14);
-    draw_hud_panel(10, 110, 250, 90, clrPanel, accentPulse,  14);
-    draw_hud_panel(270,110, 120, 90, clrPanel, clrAmber,     12);
+        draw_hud_panel(10,  10, 185, 90, clrPanel, clrAmber,     14);
+        draw_hud_panel(205, 10, 185, 90, clrPanel, clrCyan,      14);
+        draw_hud_panel(10, 110, 250, 90, clrPanel, accentPulse,  14);
+        draw_hud_panel(270,110, 120, 90, clrPanel, clrAmber,     12);
 
-    graphics_draw_static_text(&txt_cpu,     24,  18, 0.55f, clrTextDim);
-    graphics_draw_static_text(&txt_gpu,     219, 18, 0.55f, clrTextDim);
-    graphics_draw_static_text(&txt_history, 24, 118, 0.55f, clrTextDim);
+        graphics_draw_static_text(&txt_cpu,     24,  18, 0.55f, clrTextDim);
+        graphics_draw_static_text(&txt_gpu,     219, 18, 0.55f, clrTextDim);
+        graphics_draw_static_text(&txt_history, 24, 118, 0.55f, clrTextDim);
 
     snprintf(textStr, sizeof(textStr), "%.1f%%", g_cpu_usage);
     graphics_draw_dynamic_text(&textObj, textStr, 24, 38, 0.6f, clrText);
@@ -694,6 +733,7 @@ void graphics_draw_frame(int set_sub, int set_row, int preview_idx,
                        clrAmber, 10);
         graphics_draw_dynamic_text(&textObj, "DESKTOP NOTIFICATION", 90, 6, 0.6f, clrAmber);
     }
+    }
 
     // ============================ BOTTOM SCREEN ============================
     C2D_TargetClear(bottom, clrBg);
@@ -719,6 +759,16 @@ void graphics_draw_frame(int set_sub, int set_row, int preview_idx,
         else                   graphics_draw_settings_tab(set_row, preview_idx);
     }
     else if (g_screen_mode == 5) { graphics_draw_level_tab(); }
+#ifndef DISABLE_CAM
+    else if (g_screen_mode == 6) { graphics_draw_cam_tab(); }
+#endif
+    else if (g_screen_mode == 7)
+    {
+        extern float g_ctrl_emergency_progress;
+        extern int g_ctrl_touch_active;
+        extern float g_ctrl_touch_rx, g_ctrl_touch_ry;
+        graphics_draw_ctrl_tab(g_ctrl_emergency_progress, g_ctrl_touch_active, g_ctrl_touch_rx, g_ctrl_touch_ry);
+    }
 
     graphics_draw_tab_drawer(g_screen_mode, g_tab_scroll);
     C3D_FrameEnd(0);

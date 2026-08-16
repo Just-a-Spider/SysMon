@@ -25,6 +25,7 @@ pub struct TelemetryData {
     pub now_playing: String,
     pub volume: u8,
     pub brightness: u8,
+    pub stream_port: u16,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -91,7 +92,7 @@ impl SysPoller {
         }
     }
 
-    pub fn poll_data(&mut self, weather: String, sort_by_ram: bool) -> TelemetryData {
+    pub fn poll_data(&mut self, weather: String, sort_by_ram: bool, stream_port: u16) -> TelemetryData {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -176,6 +177,7 @@ impl SysPoller {
             now_playing,
             volume: get_volume_level(),
             brightness: get_brightness_level(),
+            stream_port,
         }
     }
 
