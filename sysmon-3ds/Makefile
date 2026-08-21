@@ -8,16 +8,20 @@ endif
 
 TOPDIR ?= $(CURDIR)
 
-ifeq ($(MAKECMDGOALS),nocam)
-	override ENABLE_CAM := 0
+ifeq ($(MAKECMDGOALS),cam)
+	override ENABLE_CAM := 1
 endif
 
-ifeq ($(ENABLE_CAM),0)
-	TARGET := sysmon-3ds-nocam
-	CFLAGS += -DDISABLE_CAM=1
-else
+ifeq ($(MAKECMDGOALS),cia-cam)
 	override ENABLE_CAM := 1
+endif
+
+ifeq ($(ENABLE_CAM),1)
+	TARGET := sysmon-3ds-cam
+else
+	override ENABLE_CAM := 0
 	TARGET := sysmon-3ds
+	CFLAGS += -DDISABLE_CAM=1
 endif
 
 export TARGET
@@ -155,40 +159,33 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean nocam cia cia-nocam
+.PHONY: all clean cam cia-cam nocam cia cia-nocam
 
-# GNU Make picks the default goal (what bare `make` runs) as the target of
-# the first non-".*" rule textually in the file. Since `nocam:` is defined
-# before `all:` below, without this line a bare `make` would silently build
-# the nocam variant instead of the full CAM build. Setting this explicitly
-# makes the intended default correct regardless of rule ordering.
 .DEFAULT_GOAL := all
-
-nocam:
-	@$(MAKE) --no-print-directory clean
-	@$(MAKE) --no-print-directory all ENABLE_CAM=0
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile ENABLE_CAM=$(ENABLE_CAM)
 
-# cia depends on `all` (rather than just $(OUTPUT).elf) so `make cia` works
-# standalone from a clean tree instead of silently failing when no prior
-# `make` has been run. TARGET/OUTPUT already resolve correctly for whichever
-# ENABLE_CAM value is active, so this produces sysmon-3ds.cia by default.
+# Default CIA build (No-Cam lightweight build)
 cia: all
 	./tools/bannertool makebanner -i banner.png -a assets/audio.wav -o banner.bin
 	./tools/bannertool makesmdh -s "SysMon" -l "Hardware Companion" -p "Just-a-Spider" -i icon.png -o icon.bin
 	./tools/makerom -f cia -o $(TARGET).cia -elf $(OUTPUT).elf -rsf assets/app.rsf -icon icon.bin -banner banner.bin -exefslogo -desc app:7
 	@echo "CIA BUILD COMPLETE: $(TARGET).cia"
 
-# cia-nocam: same packaging step as `cia`, but forces ENABLE_CAM=0 through a
-# clean rebuild first (mirrors the `nocam` target) so TARGET resolves to
-# sysmon-3ds-nocam and the .cia doesn't end up mixing object files built
-# against the wrong ENABLE_CAM setting.
-cia-nocam:
+# Screen Streaming (CAM) builds
+cam:
 	@$(MAKE) --no-print-directory clean
-	@$(MAKE) --no-print-directory cia ENABLE_CAM=0
+	@$(MAKE) --no-print-directory all ENABLE_CAM=1
+
+cia-cam:
+	@$(MAKE) --no-print-directory clean
+	@$(MAKE) --no-print-directory cia ENABLE_CAM=1
+
+# Compatibility aliases
+nocam: all
+cia-nocam: cia
 
 $(BUILD):
 	@mkdir -p $@
@@ -209,6 +206,7 @@ clean:
 	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
 		sysmon-3ds.3dsx sysmon-3ds.smdh sysmon-3ds.elf sysmon-3ds.cia \
 		sysmon-3ds-nocam.3dsx sysmon-3ds-nocam.smdh sysmon-3ds-nocam.elf sysmon-3ds-nocam.cia \
+		sysmon-3ds-cam.3dsx sysmon-3ds-cam.smdh sysmon-3ds-cam.elf sysmon-3ds-cam.cia \
 		banner.bin icon.bin $(GFXBUILD)
 
 #---------------------------------------------------------------------------------

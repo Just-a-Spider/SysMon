@@ -8,6 +8,7 @@ sysmon-3ds/*.3dsx
 sysmon-3ds/*.cia
 sysmon-3ds/*.smdh
 sysmon-3ds/*.map
+sysmon-3ds/*.bin
 
 # Rust Server
 sysmon-server/target/

@@ -5,7 +5,7 @@ edition = "2024"
 license = "MIT"
 description = "SysMon Server for Nintendo 3DS Companion"
 [features]
-default = ["cam"]
+default = []
 cam = ["dep:xcap", "dep:ashpd", "dep:x11rb", "dep:libc"]
 
 [dependencies]
@@ -37,9 +37,9 @@ assets = [
     { source = "../sysmon-3ds/icon.png", dest = "/usr/share/icons/hicolor/512x512/apps/sysmon-server.png", mode = "644" }
 ]
 
-[package.metadata.generate-rpm.variants.nocam]
-name = "sysmon-server-nocam"
-summary = "SysMon Server for Nintendo 3DS Companion (No-Cam lightweight build)"
+[package.metadata.generate-rpm.variants.cam]
+name = "sysmon-server-cam"
+summary = "SysMon Server for Nintendo 3DS Companion (with Screen Streaming)"
 assets = [
     { source = "target/release/sysmon-server", dest = "/usr/bin/sysmon-server", mode = "755" },
     { source = "packaging/sysmon-server.desktop", dest = "/usr/share/applications/sysmon-server.desktop", mode = "644" },
