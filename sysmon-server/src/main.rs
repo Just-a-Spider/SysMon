@@ -93,8 +93,14 @@ fn create_tray_icon() -> Icon {
 
 fn main() {
     #[cfg(target_os = "linux")]
-    if let Err(e) = gtk::init() {
-        eprintln!("Failed to initialize GTK: {}", e);
+    {
+        // On Wayland compositors (COSMIC, GNOME, KDE), libayatana-appindicator / GtkStatusIcon
+        // requires the X11/XWayland backend to connect with StatusNotifierWatcher
+        // and avoid Gtk-CRITICAL scale factor assertion failures.
+        gtk::gdk::set_allowed_backends("x11");
+        if let Err(e) = gtk::init() {
+            eprintln!("Failed to initialize GTK: {}", e);
+        }
     }
 
     let mut path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
@@ -128,7 +134,7 @@ fn main() {
         config,
         is_server_running: true,
         should_restart_server: false,
-        weather_string: "--°C".to_string(),
+        weather_string: "--C".to_string(),
         last_ping: Instant::now() - std::time::Duration::from_secs(100),
         macros,
         latest_telemetry: None,

@@ -13,6 +13,9 @@ Option:
   UseOnSD                 : true
   FreeProductCode         : true
 
+RomFs:
+  RootPath                : romfs
+
 AccessControlInfo:
   CoreVersion             : 2
   IdealProcessor          : 0

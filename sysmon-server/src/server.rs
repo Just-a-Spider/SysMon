@@ -40,7 +40,7 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
         loop {
             if let Ok(res) = reqwest::get("https://wttr.in/?format=\"%t+%C\"").await {
                 if let Ok(text) = res.text().await {
-                    let text = text.trim().replace("\"", "");
+                    let text = text.trim().replace("\"", "").replace("°", "");
                     if let Ok(mut s) = weather_state.try_lock() {
                         s.weather_string = text;
                     }

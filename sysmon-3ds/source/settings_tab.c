@@ -67,10 +67,10 @@ void graphics_draw_settings_tab(int set_row, int preview_idx)
         u32 txt_col  = focused ? tc->amber  : tc->textDim;
         graphics_draw_hud_panel(10, 8, 250, 34, tc->panel, acc, 8);
         if (focused)
-            graphics_draw_dynamic_text(&textObj, "\x10", 14, 18, 0.45f, tc->amber); // ► glyph
+            graphics_draw_dynamic_text(&textObj, ">", 14, 18, 0.45f, tc->amber);
         graphics_draw_dynamic_text(&textObj, "THEME", 28, 18, 0.45f, txt_col);
         // Centred option name
-        snprintf(textStr, sizeof(textStr), "\x11 %s \x10",
+        snprintf(textStr, sizeof(textStr), "< %s >",
                  graphics_theme_name(preview_idx));
         graphics_draw_dynamic_text(&textObj, textStr, 95, 18, 0.45f, txt_col);
         // Mini colour swatch
@@ -88,9 +88,9 @@ void graphics_draw_settings_tab(int set_row, int preview_idx)
                             ? g_profiles[pidx].name : "---";
         graphics_draw_hud_panel(10, 46, 250, 34, tc->panel, acc, 8);
         if (focused)
-            graphics_draw_dynamic_text(&textObj, "\x10", 14, 56, 0.45f, tc->cyan);
+            graphics_draw_dynamic_text(&textObj, ">", 14, 56, 0.45f, tc->cyan);
         graphics_draw_dynamic_text(&textObj, "SERVER", 28, 56, 0.45f, txt_col);
-        snprintf(textStr, sizeof(textStr), "\x11 %s \x10", pname);
+        snprintf(textStr, sizeof(textStr), "< %s >", pname);
         graphics_draw_dynamic_text(&textObj, textStr, 95, 56, 0.45f, txt_col);
     }
 
@@ -180,7 +180,7 @@ void graphics_draw_settings_manager(int set_row, int preview_idx)
         {
             // Theme row: name + mini preview
             graphics_draw_dynamic_text(&textObj,
-                                       active ? "\x01" : " ", 14, ry + 10, 0.5f, tc->amber);
+                                       active ? "*" : " ", 14, ry + 10, 0.5f, tc->amber);
             graphics_draw_dynamic_text(&textObj, graphics_theme_name(i),
                                        26, ry + 10, 0.45f, sel ? hdr_acc : tc->text);
             graphics_draw_theme_preview(150, ry + 5, 52, 28, i);
@@ -189,7 +189,7 @@ void graphics_draw_settings_manager(int set_row, int preview_idx)
         {
             // Profile row: name + IP
             graphics_draw_dynamic_text(&textObj,
-                                       active ? "\x01" : " ", 14, ry + 5,  0.5f,  tc->cyan);
+                                       active ? "*" : " ", 14, ry + 5,  0.5f,  tc->cyan);
             graphics_draw_dynamic_text(&textObj, g_profiles[i].name,
                                        26, ry + 5,  0.45f, sel ? hdr_acc : tc->text);
             snprintf(textStr, sizeof(textStr), "%s:%d", g_profiles[i].ip, g_profiles[i].port);
