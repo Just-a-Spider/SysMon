@@ -158,26 +158,28 @@
                 <label>Server TCP Port (3DS Connection)</label>
                 <input type="number" id="config-port">
             </div>
-            <div class="form-group">
-                <label>Screen Stream Port (CAM Tab)</label>
-                <input type="number" id="config-stream-port" placeholder="7340">
-            </div>
-            <div class="form-group">
-                <label>Screen Sharing Controls (OS Dialog & Sources)</label>
-                <div style="display: flex; gap: 10px; margin-bottom: 8px;">
-                    <button type="button" onclick="triggerOsPicker()" style="background-color: var(--cyan-color); color: #000; font-weight: bold; flex: 1;">🖥️ Choose Screen / Window (OS Dialog)</button>
-                    <button type="button" onclick="toggleStreamSharing()" id="btn-toggle-stream" style="background-color: var(--accent-color); flex: 1;">Toggle Sharing</button>
+            <div id="cam-streaming-section" style="display: none;">
+                <div class="form-group">
+                    <label>Screen Stream Port (CAM Tab)</label>
+                    <input type="number" id="config-stream-port" placeholder="7340">
                 </div>
-                <div style="background-color: #1a1a1a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 0.9em; margin-bottom: 8px;">
-                    <div>Sharing Enabled: <span id="stream-sharing-status" style="font-weight: bold; color: var(--accent-color);">Checking...</span></div>
-                    <div>3DS Receiver: <span id="stream-active-status" style="color: var(--text-dim);">Standby</span></div>
-                    <div>Active Source: <span id="stream-source-status" style="color: var(--cyan-color);">--</span></div>
+                <div class="form-group">
+                    <label>Screen Sharing Controls (OS Dialog & Sources)</label>
+                    <div style="display: flex; gap: 10px; margin-bottom: 8px;">
+                        <button type="button" onclick="triggerOsPicker()" style="background-color: var(--cyan-color); color: #000; font-weight: bold; flex: 1;">🖥️ Choose Screen / Window (OS Dialog)</button>
+                        <button type="button" onclick="toggleStreamSharing()" id="btn-toggle-stream" style="background-color: var(--accent-color); flex: 1;">Toggle Sharing</button>
+                    </div>
+                    <div style="background-color: #1a1a1a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 0.9em; margin-bottom: 8px;">
+                        <div>Sharing Enabled: <span id="stream-sharing-status" style="font-weight: bold; color: var(--accent-color);">Checking...</span></div>
+                        <div>3DS Receiver: <span id="stream-active-status" style="color: var(--text-dim);">Standby</span></div>
+                        <div>Active Source: <span id="stream-source-status" style="color: var(--cyan-color);">--</span></div>
+                    </div>
+                    <label>Quick Source Switcher</label>
+                    <select id="config-stream-source" style="width: 100%; padding: 8px; background-color: #1e1e1e; border: 1px solid var(--border-color); color: white; border-radius: 4px;">
+                        <option value="0">Detecting sources...</option>
+                    </select>
+                    <small style="color: #888; margin-top: 4px; display: block;">You can also cycle sources live on 3DS using <b>L</b> and <b>R</b> shoulder buttons!</small>
                 </div>
-                <label>Quick Source Switcher</label>
-                <select id="config-stream-source" style="width: 100%; padding: 8px; background-color: #1e1e1e; border: 1px solid var(--border-color); color: white; border-radius: 4px;">
-                    <option value="0">Detecting sources...</option>
-                </select>
-                <small style="color: #888; margin-top: 4px; display: block;">You can also cycle sources live on 3DS using <b>L</b> and <b>R</b> shoulder buttons!</small>
             </div>
             <div class="form-group">
                 <label>Web Dashboard Port</label>
@@ -237,14 +239,21 @@
                 try {
                     const srcRes = await fetch('/api/stream/sources');
                     const sources = await srcRes.json();
-                    const srcSelect = document.getElementById('config-stream-source');
-                    srcSelect.innerHTML = '';
-                    sources.forEach((s, idx) => {
-                        const opt = document.createElement('option');
-                        opt.value = idx;
-                        opt.textContent = `[${s.kind.toUpperCase()}] ${s.name} (${s.width}x${s.height})`;
-                        srcSelect.appendChild(opt);
-                    });
+                    const camSection = document.getElementById('cam-streaming-section');
+                    const isNoCam = sources.length === 0 || sources[0].name.includes('No-Cam');
+                    if (camSection) {
+                        camSection.style.display = isNoCam ? 'none' : 'block';
+                    }
+                    if (!isNoCam) {
+                        const srcSelect = document.getElementById('config-stream-source');
+                        srcSelect.innerHTML = '';
+                        sources.forEach((s, idx) => {
+                            const opt = document.createElement('option');
+                            opt.value = idx;
+                            opt.textContent = `[${s.kind.toUpperCase()}] ${s.name} (${s.width}x${s.height})`;
+                            srcSelect.appendChild(opt);
+                        });
+                    }
                 } catch (err) {
                     console.error("Failed to load stream sources", err);
                 }
