@@ -648,7 +648,15 @@ void graphics_draw_frame(int set_sub, int set_row, int preview_idx,
         draw_hud_panel(270,110, 120, 90, clrPanel, clrAmber,     12);
 
         graphics_draw_static_text(&txt_cpu,     24,  18, 0.55f, clrTextDim);
-        graphics_draw_static_text(&txt_gpu,     219, 18, 0.55f, clrTextDim);
+        if (g_gpu_name[0] && strcmp(g_gpu_name, "GPU") != 0)
+        {
+            snprintf(textStr, sizeof(textStr), "GPU [%s]", g_gpu_name);
+            graphics_draw_dynamic_text(&textObj, textStr, 219, 18, 0.42f, clrTextDim);
+        }
+        else
+        {
+            graphics_draw_static_text(&txt_gpu, 219, 18, 0.55f, clrTextDim);
+        }
         graphics_draw_static_text(&txt_history, 24, 118, 0.55f, clrTextDim);
 
     snprintf(textStr, sizeof(textStr), "%.1f%%", g_cpu_usage);

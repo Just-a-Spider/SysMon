@@ -1,4 +1,6 @@
+#[cfg(target_os = "linux")]
 use evdev::uinput::VirtualDevice;
+#[cfg(target_os = "linux")]
 use evdev::{
     AbsInfo, AbsoluteAxisCode, AttributeSet, BusType, InputEvent, InputId, KeyCode,
     UinputAbsSetup,
@@ -7,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+#[cfg(target_os = "linux")]
 use tokio::sync::Mutex;
 
 const MAGIC: &[u8; 4] = b"3PAD";
@@ -25,7 +28,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
         }
     };
 
-    // Attempt to create Linux uinput virtual gamepad
+    #[cfg(target_os = "linux")]
     let device = match create_virtual_gamepad() {
         Ok(dev) => {
             println!("Initialized SysMon 3DS Virtual Controller on /dev/uinput");
@@ -45,6 +48,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
     let has_active_state = Arc::new(AtomicBool::new(false));
 
     // Watchdog Task: Zeroes out axes and releases buttons if no packet received for >200ms
+    #[cfg(target_os = "linux")]
     if let Some(dev_watchdog) = device.clone() {
         let last_time_clone = last_packet_time.clone();
         let active_state_clone = has_active_state.clone();
@@ -107,9 +111,15 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                 }
                 has_active_state.store(true, Ordering::SeqCst);
 
+                #[cfg(target_os = "linux")]
                 if let Some(ref dev_arc) = device {
                     let mut dev = dev_arc.lock().await;
                     apply_gamepad_state(&mut dev, buttons, circle_x, circle_y, right_x, right_y, flags);
+                }
+
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = (buttons, circle_x, circle_y, right_x, right_y, flags);
                 }
             }
             Err(e) => {
@@ -120,6 +130,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn create_virtual_gamepad() -> std::io::Result<evdev::uinput::VirtualDevice> {
     let mut keys = AttributeSet::<KeyCode>::new();
     keys.insert(KeyCode::BTN_SOUTH); // 3DS B (Physical South / PSP Cross)
@@ -159,6 +170,7 @@ fn create_virtual_gamepad() -> std::io::Result<evdev::uinput::VirtualDevice> {
     Ok(dev)
 }
 
+#[cfg(target_os = "linux")]
 fn apply_gamepad_state(
     dev: &mut evdev::uinput::VirtualDevice,
     buttons: u32,
@@ -233,6 +245,7 @@ fn apply_gamepad_state(
     let _ = dev.emit(&events);
 }
 
+#[cfg(target_os = "linux")]
 fn zero_virtual_gamepad(dev: &mut evdev::uinput::VirtualDevice) {
     let mut events = Vec::with_capacity(16);
     events.push(InputEvent::new(evdev::EventType::KEY.0, KeyCode::BTN_SOUTH.0, 0));
