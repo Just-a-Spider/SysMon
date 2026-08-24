@@ -20,6 +20,7 @@ typedef struct
 
 extern float g_cpu_temp;
 extern float g_gpu_temp;
+extern char g_gpu_name[32];
 extern float g_free_ram;
 extern float g_cpu_usage;
 extern int g_cpu_fan;

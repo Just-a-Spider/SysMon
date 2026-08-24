@@ -16,6 +16,7 @@
 
 float g_cpu_temp = 0.0f;
 float g_gpu_temp = 0.0f;
+char g_gpu_name[32] = "GPU";
 float g_free_ram = 0.0f;
 float g_cpu_usage = 0.0f;
 int g_cpu_fan = 0;
@@ -92,6 +93,16 @@ static void parse_telemetry(const char *json)
     char *gpu_temp_str = strstr(json, "\"gpu_temp\":");
     if (gpu_temp_str)
         sscanf(gpu_temp_str, "\"gpu_temp\":%f", &g_gpu_temp);
+
+    char *gpu_name_str = strstr(json, "\"gpu_name\":");
+    if (gpu_name_str)
+    {
+        char val[32] = {0};
+        if (sscanf(gpu_name_str, "\"gpu_name\":\"%31[^\"]\"", val) == 1)
+        {
+            snprintf(g_gpu_name, sizeof(g_gpu_name), "%s", val);
+        }
+    }
 
     char *free_ram_str = strstr(json, "\"free_ram\":");
     if (free_ram_str)

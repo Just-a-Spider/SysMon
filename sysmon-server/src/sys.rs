@@ -16,6 +16,7 @@ pub struct TelemetryData {
     pub gpu_fan: i32,
     pub cpu_temp: f32,
     pub gpu_temp: f32,
+    pub gpu_name: String,
     pub free_ram: f32,
     pub cpu_usage: String,
     pub top_procs: Vec<ProcessInfo>,
@@ -121,20 +122,35 @@ impl SysPoller {
         procs.truncate(5);
 
         let mut cpu_temp = 0.0;
-        let mut gpu_temp = 0.0;
-        
         for component in self.components.list() {
             let label = component.label().to_lowercase();
             if label.contains("cpu") || label.contains("core") || label.contains("tctl") || label.contains("package") {
                 if cpu_temp == 0.0 {
                     cpu_temp = component.temperature().unwrap_or(0.0);
                 }
-            } else if label.contains("gpu") || label.contains("edge") || label.contains("junction") {
-                if gpu_temp == 0.0 {
-                    gpu_temp = component.temperature().unwrap_or(0.0);
-                }
             }
         }
+
+        let (gpu_name, gpu_temp) = if let Some((name, temp)) = get_dedicated_gpu_data() {
+            (name, temp)
+        } else {
+            let mut fallback_temp = 0.0;
+            let mut fallback_name = "GPU".to_string();
+            for component in self.components.list() {
+                let label = component.label().to_lowercase();
+                if label.contains("gpu") || label.contains("edge") || label.contains("junction") || label.contains("amdgpu") {
+                    if fallback_temp == 0.0 {
+                        fallback_temp = component.temperature().unwrap_or(0.0);
+                        if label.contains("amd") || label.contains("edge") {
+                            fallback_name = "Radeon".to_string();
+                        } else if label.contains("intel") {
+                            fallback_name = "Intel".to_string();
+                        }
+                    }
+                }
+            }
+            (fallback_name, fallback_temp)
+        };
 
         let mut cpu_fan = 0;
         let mut gpu_fan = 0;
@@ -179,6 +195,7 @@ impl SysPoller {
             gpu_fan,
             cpu_temp,
             gpu_temp,
+            gpu_name,
             free_ram,
             cpu_usage: format!("{:.1}", cpu_usage),
             top_procs: procs,
@@ -343,6 +360,33 @@ pub fn get_windows_now_playing() -> String {
     }
     unsafe { EnumWindows(Some(enum_proc), 0); }
     FOUND_TITLE.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+pub fn get_dedicated_gpu_data() -> Option<(String, f32)> {
+    if let Ok(output) = Command::new("nvidia-smi")
+        .args(&["--query-gpu=name,temperature.gpu", "--format=csv,noheader,nounits"])
+        .output() 
+    {
+        if output.status.success() {
+            let s = String::from_utf8_lossy(&output.stdout);
+            if let Some(line) = s.lines().next() {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 2 {
+                    let name = parts[0].trim()
+                        .replace("NVIDIA GeForce ", "")
+                        .replace("GeForce ", "")
+                        .replace("with Max-Q Design", "Max-Q")
+                        .replace("Laptop GPU", "")
+                        .trim()
+                        .to_string();
+                    if let Ok(temp) = parts[1].trim().parse::<f32>() {
+                        return Some((name, temp));
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn kill_proc(pid: u32) {
