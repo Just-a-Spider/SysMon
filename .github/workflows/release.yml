@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-3ds:
+    name: Build 3DS Release
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup 3DS CIA Tools
+        run: |
+          cd sysmon-3ds
+          chmod +x setup_cia_tools.sh
+          ./setup_cia_tools.sh
+
+      - name: Build Standard 3DS App (.3dsx & .cia)
+        run: |
+          cd sysmon-3ds
+          make clean
+          make cia
+
+      - name: Verify 3DS Artifacts
+        run: |
+          test -f sysmon-3ds/sysmon-3ds.3dsx
+          test -f sysmon-3ds/sysmon-3ds.cia
+
+      - name: Upload 3DS Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3ds-release
+          path: |
+            sysmon-3ds/sysmon-3ds.3dsx
+            sysmon-3ds/sysmon-3ds.cia
+
+  build-linux:
+    name: Build Linux Packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxdo-dev libasound2-dev libudev-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: sysmon-server -> target
+
+      - name: Install Packaging Tools
+        run: |
+          cargo install cargo-deb cargo-generate-rpm
+
+      - name: Build Standard Release Binary
+        run: |
+          cd sysmon-server
+          cargo build --release
+
+      - name: Build Debian Package (.deb)
+        run: |
+          cd sysmon-server
+          cargo deb --no-build
+
+      - name: Build RPM Package (.rpm)
+        run: |
+          cd sysmon-server
+          cargo generate-rpm
+
+      - name: Assemble Linux Standalone Tarball (.tar.gz)
+        run: |
+          mkdir -p staging/sysmon-server-linux-x86_64
+          cp sysmon-server/target/release/sysmon-server staging/sysmon-server-linux-x86_64/
+          cp sysmon-server/packaging/sysmon-server.desktop staging/sysmon-server-linux-x86_64/
+          cp sysmon-server/packaging/99-sysmon-uinput.rules staging/sysmon-server-linux-x86_64/
+          cp sysmon-3ds/icon.png staging/sysmon-server-linux-x86_64/
+          cp README.md LICENSE staging/sysmon-server-linux-x86_64/
+          cd staging
+          tar -czvf ../sysmon-server-linux-x86_64.tar.gz sysmon-server-linux-x86_64
+          cd ..
+
+      - name: Prepare Linux Output Directory
+        run: |
+          mkdir -p linux_dist
+          cp sysmon-server-linux-x86_64.tar.gz linux_dist/
+          cp sysmon-server/target/debian/*.deb linux_dist/
+          cp sysmon-server/target/generate-rpm/*.rpm linux_dist/
+
+      - name: Upload Linux Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: linux_dist/*
+
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: sysmon-server -> target
+
+      - name: Build Standard Release Binary
+        run: |
+          cd sysmon-server
+          cargo build --release
+
+      - name: Assemble Windows Zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging/sysmon-server-windows-x86_64
+          Copy-Item sysmon-server/target/release/sysmon-server.exe -Destination staging/sysmon-server-windows-x86_64/
+          Copy-Item sysmon-3ds/icon.png -Destination staging/sysmon-server-windows-x86_64/
+          Copy-Item README.md -Destination staging/sysmon-server-windows-x86_64/
+          Copy-Item LICENSE -Destination staging/sysmon-server-windows-x86_64/
+          Compress-Archive -Path staging/sysmon-server-windows-x86_64 -DestinationPath sysmon-server-windows-x86_64.zip
+
+      - name: Upload Windows Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: sysmon-server-windows-x86_64.zip
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-3ds, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download 3DS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: 3ds-release
+          path: release_assets
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+          path: release_assets
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release_assets
+
+      - name: Verify Exact 3DS File Names
+        run: |
+          test -f release_assets/sysmon-3ds.3dsx
+          test -f release_assets/sysmon-3ds.cia
+
+      - name: Generate Checksums
+        run: |
+          cd release_assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+      - name: Determine Prerelease Status
+        id: prerelease_check
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          if [[ "$TAG_NAME" == *"-"* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+            echo "Detected prerelease tag: $TAG_NAME"
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+            echo "Detected stable release tag: $TAG_NAME"
+          fi
+
+      - name: Publish Release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_assets/*
+          prerelease: ${{ steps.prerelease_check.outputs.is_prerelease }}
+          generate_release_notes: true

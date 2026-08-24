@@ -1,6 +1,6 @@
 [package]
 name = "sysmon-server"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 description = "SysMon Server for Nintendo 3DS Companion"
@@ -12,10 +12,7 @@ cam = ["dep:xcap", "dep:ashpd", "dep:x11rb", "dep:libc"]
 axum = "0.8.9"
 open = "5.3"
 tao = "0.24"
-enigo = { version = "0.6.1", features = ["wayland"] }
-gtk = "0.18"
 image = "0.25.10"
-mpris = "2.1.0"
 muda = "0.19.3"
 reqwest = "0.13.4"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -23,11 +20,23 @@ serde_json = "1.0.151"
 sysinfo = "0.38.4"
 tokio = { version = "1.53.1", features = ["full"] }
 tray-icon = "0.24.1"
+dirs = "6.0"
 xcap = { version = "0.9.8", optional = true }
 x11rb = { version = "0.14.0", features = ["allow-unsafe-code"], optional = true }
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast"], optional = true }
 libc = { version = "0.2", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
+gtk = "0.18"
+mpris = "2.1.0"
+enigo = { version = "0.6.1", features = ["wayland"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+enigo = { version = "0.6.1" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
 [package.metadata.generate-rpm]
 assets = [
@@ -45,5 +54,19 @@ assets = [
     { source = "packaging/sysmon-server.desktop", dest = "/usr/share/applications/sysmon-server.desktop", mode = "644" },
     { source = "packaging/99-sysmon-uinput.rules", dest = "/usr/lib/udev/rules.d/99-sysmon-uinput.rules", mode = "644" },
     { source = "../sysmon-3ds/icon.png", dest = "/usr/share/icons/hicolor/512x512/apps/sysmon-server.png", mode = "644" }
+]
+
+[package.metadata.deb]
+maintainer = "Just-a-Spider"
+copyright = "2026 Just-a-Spider"
+license-file = ["../LICENSE", "4"]
+extended-description = "SysMon server companion for Nintendo 3DS hardware monitoring and macros"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/sysmon-server", "usr/bin/sysmon-server", "755"],
+    ["packaging/sysmon-server.desktop", "usr/share/applications/sysmon-server.desktop", "644"],
+    ["packaging/99-sysmon-uinput.rules", "lib/udev/rules.d/99-sysmon-uinput.rules", "644"],
+    ["../sysmon-3ds/icon.png", "usr/share/icons/hicolor/512x512/apps/sysmon-server.png", "644"],
 ]
 

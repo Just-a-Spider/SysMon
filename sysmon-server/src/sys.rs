@@ -1,5 +1,4 @@
 use sysinfo::{Components, System};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::{Deserialize, Serialize};
@@ -28,10 +27,10 @@ pub struct TelemetryData {
     pub stream_port: u16,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MacroDef {
     pub button: Option<String>,
-    #[serde(rename = "type")]
+    #[serde(alias = "kind", alias = "type", rename = "type")]
     pub kind: String,
     pub label: String,
     pub value: String,
@@ -44,7 +43,9 @@ pub struct MacroDef {
 pub struct SysPoller {
     sys: System,
     components: Components,
+    #[allow(dead_code)]
     cpu_fan_path: Option<PathBuf>,
+    #[allow(dead_code)]
     gpu_fan_path: Option<PathBuf>,
 }
 
@@ -55,14 +56,14 @@ impl SysPoller {
         
         let components = Components::new_with_refreshed_list();
         
-        // Cache fan paths once to avoid iterating directories every 1.5s
         let mut cpu_fan_path = None;
         let mut gpu_fan_path = None;
         
-        if let Ok(entries) = fs::read_dir("/sys/class/hwmon/") {
+        #[cfg(target_os = "linux")]
+        if let Ok(entries) = std::fs::read_dir("/sys/class/hwmon/") {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if let Ok(name) = fs::read_to_string(path.join("name")) {
+                if let Ok(name) = std::fs::read_to_string(path.join("name")) {
                     let name = name.trim().to_lowercase();
                     
                     if name == "amdgpu" || name.contains("gpu") {
@@ -138,18 +139,23 @@ impl SysPoller {
         let mut cpu_fan = 0;
         let mut gpu_fan = 0;
         
-        if let Some(ref path) = self.cpu_fan_path {
-            if let Ok(content) = fs::read_to_string(path) {
-                cpu_fan = content.trim().parse::<i32>().unwrap_or(0);
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(ref path) = self.cpu_fan_path {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    cpu_fan = content.trim().parse::<i32>().unwrap_or(0);
+                }
             }
-        }
-        if let Some(ref path) = self.gpu_fan_path {
-            if let Ok(content) = fs::read_to_string(path) {
-                gpu_fan = content.trim().parse::<i32>().unwrap_or(0);
+            if let Some(ref path) = self.gpu_fan_path {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    gpu_fan = content.trim().parse::<i32>().unwrap_or(0);
+                }
             }
         }
 
+        #[cfg(target_os = "linux")]
         let mut now_playing = "".to_string();
+        #[cfg(target_os = "linux")]
         if let Ok(player_finder) = mpris::PlayerFinder::new() {
             if let Ok(player) = player_finder.find_active() {
                 if let Ok(metadata) = player.get_metadata() {
@@ -163,6 +169,10 @@ impl SysPoller {
                 }
             }
         }
+        #[cfg(target_os = "windows")]
+        let now_playing = get_windows_now_playing();
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        let now_playing = "".to_string();
 
         TelemetryData {
             cpu_fan,
@@ -181,8 +191,9 @@ impl SysPoller {
         }
     }
 
+    #[allow(dead_code)]
     fn find_first_file(path: &Path, prefix: &str, suffix: &str) -> Option<PathBuf> {
-        if let Ok(entries) = fs::read_dir(path) {
+        if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 let file_name = entry.file_name();
                 let name = file_name.to_string_lossy();
@@ -194,9 +205,10 @@ impl SysPoller {
         None
     }
 
+    #[allow(dead_code)]
     fn find_all_files(path: &Path, prefix: &str, suffix: &str) -> Vec<PathBuf> {
         let mut vals = Vec::new();
-        if let Ok(entries) = fs::read_dir(path) {
+        if let Ok(entries) = std::fs::read_dir(path) {
             let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
             paths.sort();
             for p in paths {
@@ -210,6 +222,7 @@ impl SysPoller {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn get_volume_level() -> u8 {
     if let Ok(output) = Command::new("wpctl").args(&["get-volume", "@DEFAULT_AUDIO_SINK@"]).output() {
         let s = String::from_utf8_lossy(&output.stdout);
@@ -232,6 +245,12 @@ fn get_volume_level() -> u8 {
     72
 }
 
+#[cfg(not(target_os = "linux"))]
+fn get_volume_level() -> u8 {
+    72
+}
+
+#[cfg(target_os = "linux")]
 fn get_brightness_level() -> u8 {
     if let Ok(output) = Command::new("brightnessctl").arg("get").output() {
         let val_s = String::from_utf8_lossy(&output.stdout);
@@ -264,21 +283,91 @@ fn get_brightness_level() -> u8 {
     48
 }
 
+#[cfg(not(target_os = "linux"))]
+fn get_brightness_level() -> u8 {
+    50
+}
+
 pub fn trigger_notify() {
-    let _ = Command::new("notify-send")
-        .args(&["3DS Pomodoro", "Time to stretch!"])
-        .spawn();
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("notify-send")
+            .args(&["3DS Pomodoro", "Time to stretch!"])
+            .spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("cmd")
+            .args(&["/C", "msg * 3DS Pomodoro: Time to stretch!"])
+            .spawn();
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn get_windows_now_playing() -> String {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, BOOL};
+    use std::sync::Mutex;
+
+    static FOUND_TITLE: Mutex<String> = Mutex::new(String::new());
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, _: LPARAM) -> BOOL {
+        if IsWindowVisible(hwnd) != 0 {
+            let mut buf = [0u16; 512];
+            let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
+            if len > 0 {
+                let title = String::from_utf16_lossy(&buf[..len as usize]);
+                let title_low = title.to_lowercase();
+                if title_low.contains(" - youtube") 
+                    || title_low.contains("spotify") 
+                    || title_low.contains("vlc media player")
+                    || title_low.contains(" - soundcloud") {
+                    if let Ok(mut lock) = FOUND_TITLE.lock() {
+                        let cleaned = title
+                            .replace(" - YouTube - Microsoft​ Edge", "")
+                            .replace(" - YouTube - Microsoft Edge", "")
+                            .replace(" - YouTube - Google Chrome", "")
+                            .replace(" - YouTube - Mozilla Firefox", "")
+                            .replace(" - VLC media player", "");
+                        *lock = cleaned;
+                    }
+                    return 0; // stop enumerating
+                }
+            }
+        }
+        1
+    }
+
+    if let Ok(mut lock) = FOUND_TITLE.lock() {
+        *lock = String::new();
+    }
+    unsafe { EnumWindows(Some(enum_proc), 0); }
+    FOUND_TITLE.lock().map(|s| s.clone()).unwrap_or_default()
 }
 
 pub fn kill_proc(pid: u32) {
-    // Replaced massive /proc traversal with a direct native O(1) signal
-    let _ = Command::new("kill").arg("-9").arg(pid.to_string()).spawn();
+    let mut sys = System::new();
+    let p_id = sysinfo::Pid::from_u32(pid);
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p_id]), true);
+    if let Some(p) = sys.process(p_id) {
+        p.kill();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill").args(&["/F", "/PID", &pid.to_string()]).spawn();
+    }
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").arg("-9").arg(pid.to_string()).spawn();
+    }
 }
 
+#[cfg(target_os = "linux")]
 fn clamp_percent(value: u8) -> u8 {
     value.min(100)
 }
 
+#[cfg(target_os = "linux")]
 fn run_first_available(commands: &[(&str, Vec<String>)]) {
     for (program, args) in commands {
         if Command::new(program).args(args).spawn().is_ok() {
@@ -287,6 +376,7 @@ fn run_first_available(commands: &[(&str, Vec<String>)]) {
     }
 }
 
+#[cfg(target_os = "linux")]
 pub fn set_volume_level(level: u8) {
     let level = clamp_percent(level);
     let level_str = format!("{}%", level);
@@ -297,6 +387,10 @@ pub fn set_volume_level(level: u8) {
     ]);
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn set_volume_level(_level: u8) {}
+
+#[cfg(target_os = "linux")]
 pub fn set_brightness_level(level: u8) {
     let level = clamp_percent(level);
     let level_str = format!("{}%", level);
@@ -326,6 +420,9 @@ pub fn set_brightness_level(level: u8) {
         }
     }
 }
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_brightness_level(_level: u8) {}
 
 use enigo::{Enigo, Keyboard, Key, Direction};
 use std::sync::Arc;
@@ -396,7 +493,14 @@ fn press_key_combo(combo: &str, enigo: &mut Enigo) {
 pub async fn trigger_macro(mac: &MacroDef, enigo: Arc<tokio::sync::Mutex<Enigo>>) {
     match mac.kind.as_str() {
         "cmd" => {
-            let _ = Command::new("sh").arg("-c").arg(&mac.value).spawn();
+            #[cfg(unix)]
+            {
+                let _ = Command::new("sh").arg("-c").arg(&mac.value).spawn();
+            }
+            #[cfg(windows)]
+            {
+                let _ = Command::new("cmd.exe").args(&["/C", &mac.value]).spawn();
+            }
         }
         "keys" => {
             let mut e = enigo.lock().await;
@@ -414,17 +518,40 @@ pub async fn trigger_macro(mac: &MacroDef, enigo: Arc<tokio::sync::Mutex<Enigo>>
     }
 }
 
-pub async fn media_command(btn: &str) {
-    if let Ok(player_finder) = mpris::PlayerFinder::new() {
-        if let Ok(player) = player_finder.find_active() {
-            match btn {
-                "playpause" => { let _ = player.play_pause(); },
-                "play" => { let _ = player.play(); },
-                "pause" => { let _ = player.pause(); },
-                "next" => { let _ = player.next(); },
-                "prev" => { let _ = player.previous(); },
-                _ => {}
+pub async fn media_command(btn: &str, _enigo: Option<Arc<tokio::sync::Mutex<Enigo>>>) {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(player_finder) = mpris::PlayerFinder::new() {
+            if let Ok(player) = player_finder.find_active() {
+                match btn {
+                    "playpause" => { let _ = player.play_pause(); },
+                    "play" => { let _ = player.play(); },
+                    "pause" => { let _ = player.pause(); },
+                    "next" => { let _ = player.next(); },
+                    "prev" => { let _ = player.previous(); },
+                    _ => {}
+                }
+                return;
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Some(enigo_arc) = _enigo {
+            let mut e = enigo_arc.lock().await;
+            let key = match btn {
+                "playpause" | "play" | "pause" => Some(Key::MediaPlayPause),
+                "next" => Some(Key::MediaNextTrack),
+                "prev" => Some(Key::MediaPrevTrack),
+                _ => None,
+            };
+            if let Some(k) = key {
+                let _ = e.key(k, Direction::Press);
+                tokio::time::sleep(tokio::time::Duration::from_millis(40)).await;
+                let _ = e.key(k, Direction::Release);
             }
         }
     }
 }
+

@@ -70,12 +70,13 @@ void graphics_draw_settings_tab(int set_row, int preview_idx)
             graphics_draw_dynamic_text(&textObj, ">", 14, 18, 0.45f, tc->amber);
         graphics_draw_dynamic_text(&textObj, "THEME", 28, 18, 0.45f, txt_col);
         // Centred option name
+        int tidx = (set_row == 0) ? preview_idx : g_theme_index;
         snprintf(textStr, sizeof(textStr), "< %s >",
-                 graphics_theme_name(preview_idx));
+                 graphics_theme_name(tidx));
         graphics_draw_dynamic_text(&textObj, textStr, 95, 18, 0.45f, txt_col);
         // Mini colour swatch
-        if (preview_idx >= 0)
-            graphics_draw_theme_preview(205, 12, 50, 26, preview_idx);
+        if (tidx >= 0)
+            graphics_draw_theme_preview(205, 12, 50, 26, tidx);
     }
 
     // Row 1: SERVER
@@ -294,7 +295,7 @@ void graphics_draw_settings_editor(int set_row, int editing,
         graphics_draw_dynamic_text(&textObj, textStr, 8, 207, 0.38f, tc->textDim);
 
         // Save hint
-        graphics_draw_dynamic_text(&textObj, "A:SAVE  B:CANCEL", 60, 222, 0.38f, tc->textDim);
+        graphics_draw_dynamic_text(&textObj, "A:SWATCH  Y:SAVE  B:CANCEL", 34, 222, 0.38f, tc->textDim);
     }
     else
     {
@@ -327,6 +328,6 @@ void graphics_draw_settings_editor(int set_row, int editing,
                 graphics_draw_dynamic_text(&textObj, "TAP", 218, ry + 10, 0.35f, hdr_acc);
         }
 
-        graphics_draw_dynamic_text(&textObj, "A:SAVE  B:CANCEL", 60, 212, 0.38f, tc->textDim);
+        graphics_draw_dynamic_text(&textObj, "A/TAP:EDIT  Y:SAVE  B:CANCEL", 34, 212, 0.38f, tc->textDim);
     }
 }

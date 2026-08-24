@@ -194,8 +194,11 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
     };
     
     if msg.pin.as_deref() != Some(&pin) {
+        eprintln!("[SysMon Server] Auth failed: received PIN {:?}, expected PIN {:?}", msg.pin, pin);
         return; // Auth failed
     }
+
+    println!("[SysMon Server] Action received: '{}', btn: {:?}, pid: {:?}", msg.action, msg.btn, msg.pid);
 
     match msg.action.as_str() {
         "button" => {
@@ -206,6 +209,7 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
                 };
                 
                 if let Some(mac) = macro_opt {
+                    println!("[SysMon Server] Triggering macro '{}' ({}): {:?}", mac.label, mac.kind, mac.value);
                     let mut rm = srv.running_macros.lock().await;
                     if rm.insert(btn.clone()) {
                         let rm_clone = srv.running_macros.clone();
@@ -216,16 +220,20 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
                             rm.remove(&btn);
                         });
                     }
+                } else {
+                    println!("[SysMon Server] No macro found mapped to button '{}'", btn);
                 }
             }
         },
         "media" => {
             if let Some(btn) = msg.btn {
-                crate::sys::media_command(&btn).await;
+                println!("[SysMon Server] Dispatching media command: '{}'", btn);
+                crate::sys::media_command(&btn, Some(srv.enigo.clone())).await;
             }
         },
         "kill" => {
             if let Some(pid) = msg.pid {
+                println!("[SysMon Server] Killing process PID: {}", pid);
                 kill_proc(pid);
             }
         },

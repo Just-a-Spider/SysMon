@@ -16,6 +16,49 @@ fn default_web_port() -> u16 { 7342 }
 fn default_stream_port() -> u16 { 7340 }
 fn default_controller_port() -> u16 { 7339 }
 
+fn default_macros() -> Vec<crate::sys::MacroDef> {
+    vec![
+        crate::sys::MacroDef {
+            button: Some("T1".to_string()),
+            label: "TaskMgr".to_string(),
+            kind: "keys".to_string(),
+            value: "ctrl+shift+esc".to_string(),
+            color: "#00E5FF".to_string(),
+            icon: "".to_string(),
+        },
+        crate::sys::MacroDef {
+            button: Some("T2".to_string()),
+            label: "Calc".to_string(),
+            kind: "cmd".to_string(),
+            #[cfg(windows)]
+            value: "calc.exe".to_string(),
+            #[cfg(not(windows))]
+            value: "gnome-calculator || kcalc || xcalc".to_string(),
+            color: "#FF5252".to_string(),
+            icon: "".to_string(),
+        },
+        crate::sys::MacroDef {
+            button: Some("T3".to_string()),
+            label: "Google".to_string(),
+            kind: "open".to_string(),
+            value: "https://google.com".to_string(),
+            color: "#69F0AE".to_string(),
+            icon: "".to_string(),
+        },
+        crate::sys::MacroDef {
+            button: Some("T4".to_string()),
+            label: "Notepad".to_string(),
+            kind: "cmd".to_string(),
+            #[cfg(windows)]
+            value: "notepad.exe".to_string(),
+            #[cfg(not(windows))]
+            value: "gedit || kwrite || mousepad || nano".to_string(),
+            color: "#FFD700".to_string(),
+            icon: "".to_string(),
+        },
+    ]
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub pin: String,
@@ -57,26 +100,23 @@ pub struct AppState {
     pub streamer_state: Arc<crate::streamer::StreamerState>,
 }
 
+fn get_config_dir() -> std::path::PathBuf {
+    let mut dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    dir.push("sysmon-server");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 impl AppState {
     pub fn save_config(&self) {
-        let mut path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-        path.push(".config");
-        path.push("sysmon-server");
-        let _ = std::fs::create_dir_all(&path);
-        path.push("config.json");
-
+        let path = get_config_dir().join("config.json");
         if let Ok(json) = serde_json::to_string_pretty(&self.config) {
             let _ = std::fs::write(path, json);
         }
     }
     
     pub fn save_macros(&self) {
-        let mut path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-        path.push(".config");
-        path.push("sysmon-server");
-        let _ = std::fs::create_dir_all(&path);
-        path.push("macros.json");
-
+        let path = get_config_dir().join("macros.json");
         if let Ok(json) = serde_json::to_string_pretty(&self.macros) {
             let _ = std::fs::write(path, json);
         }
@@ -103,29 +143,25 @@ fn main() {
         }
     }
 
-    let mut path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-    path.push(".config");
-    path.push("sysmon-server");
-    let _ = std::fs::create_dir_all(&path);
-    path.push("config.json");
-
+    let config_path = get_config_dir().join("config.json");
     let mut config = AppConfig::default();
-    if let Ok(content) = std::fs::read_to_string(path) {
+    if let Ok(content) = std::fs::read_to_string(config_path) {
         if let Ok(parsed) = serde_json::from_str::<AppConfig>(&content) {
             config = parsed;
         }
     }
 
-    let mut macros_path = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-    macros_path.push(".config");
-    macros_path.push("sysmon-server");
-    macros_path.push("macros.json");
-
-    let macros = if let Ok(content) = std::fs::read_to_string(macros_path) {
+    let macros_path = get_config_dir().join("macros.json");
+    let mut macros: Vec<crate::sys::MacroDef> = if let Ok(content) = std::fs::read_to_string(&macros_path) {
         serde_json::from_str(&content).unwrap_or_default()
     } else {
         Vec::new()
     };
+
+    if macros.is_empty() {
+        macros = default_macros();
+        let _ = std::fs::write(&macros_path, serde_json::to_string_pretty(&macros).unwrap_or_default());
+    }
 
     let initial_stream_port = config.stream_port;
     let streamer_state = Arc::new(streamer::StreamerState::new(initial_stream_port));
