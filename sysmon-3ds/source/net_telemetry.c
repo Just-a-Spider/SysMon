@@ -400,7 +400,7 @@ void network_send_json(const char *json_str)
     LightLock_Lock(&send_lock);
     char buf[1024];
     snprintf(buf, sizeof(buf), "%s\n", json_str);
-    send(g_socket, buf, strlen(buf), MSG_DONTWAIT);
+    send(g_socket, buf, strlen(buf), 0);
     LightLock_Unlock(&send_lock);
 }
 
