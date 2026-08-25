@@ -97,7 +97,10 @@ jobs:
         run: |
           mkdir -p linux_dist
           cp sysmon-server-linux-x86_64.tar.gz linux_dist/
-          cp sysmon-server/target/debian/*.deb linux_dist/
+          for f in sysmon-server/target/debian/*.deb; do
+            filename=$(basename "$f")
+            cp "$f" "linux_dist/${filename/sysmon-server_/sysmon-server-}"
+          done
           cp sysmon-server/target/generate-rpm/*.rpm linux_dist/
 
       - name: Upload Linux Release Artifacts
