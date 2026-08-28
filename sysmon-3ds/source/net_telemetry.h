@@ -46,6 +46,7 @@ extern u64 g_last_level_touch_time;
 
 Result net_telemetry_start(void);
 void   net_telemetry_stop(void);
+void   net_telemetry_reconnect(void);
 void   network_send_json(const char *json_str);
 void   network_send_level(const char *target, int value);
 

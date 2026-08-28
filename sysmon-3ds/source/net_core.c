@@ -47,6 +47,19 @@ void net_core_exit(void)
     }
 }
 
+void net_core_set_target(const char *ip, int port, const char *pin)
+{
+    if (ip && ip[0])
+        strncpy(g_srv_ip, ip, sizeof(g_srv_ip) - 1);
+    if (port > 0)
+        g_srv_port = port;
+    if (pin && pin[0])
+    {
+        strncpy(g_auth_key, pin, sizeof(g_auth_key) - 1);
+        g_auth_key[sizeof(g_auth_key) - 1] = '\0';
+    }
+}
+
 void network_load_profiles(void)
 {
     FILE *f = fopen("sdmc:/sysmon_cfg.txt", "r");

@@ -22,6 +22,7 @@ extern int g_srv_port;
 
 Result net_core_init(const char *ip, int port);
 void   net_core_exit(void);
+void   net_core_set_target(const char *ip, int port, const char *pin);
 void   network_load_profiles(void);
 void   network_save_profiles(void);
 

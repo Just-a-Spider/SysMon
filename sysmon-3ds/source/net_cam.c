@@ -242,16 +242,21 @@ Result net_cam_start(void)
     return cam_thread ? 0 : -1;
 }
 
-void net_cam_stop(void)
+void net_cam_reconnect(void)
 {
-    g_cam_running = 0;
-    g_cam_want_stream = 0;
     if (g_cam_socket >= 0)
     {
         shutdown(g_cam_socket, SHUT_RDWR);
         close(g_cam_socket);
         g_cam_socket = -1;
     }
+}
+
+void net_cam_stop(void)
+{
+    g_cam_running = 0;
+    g_cam_want_stream = 0;
+    net_cam_reconnect();
     if (cam_thread)
     {
         threadJoin(cam_thread, U64_MAX);
