@@ -29,7 +29,7 @@ Result net_ctrl_start(const char *ip, int port)
         s_ctrl_sock = -1;
     }
 
-    s_ctrl_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    s_ctrl_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (s_ctrl_sock < 0)
         return -1;
 
@@ -120,7 +120,7 @@ void net_ctrl_send_tick(u32 buttons, s16 cx, s16 cy, s16 rx, s16 ry, u32 flags)
     pkt[26] = (u8)((final_flags >> 8)  & 0xFF);
     pkt[27] = (u8)(final_flags & 0xFF);
 
-    ssize_t sent = sendto(s_ctrl_sock, pkt, sizeof(pkt), MSG_DONTWAIT, (struct sockaddr *)&s_srv_addr, sizeof(s_srv_addr));
+    ssize_t sent = sendto(s_ctrl_sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&s_srv_addr, sizeof(s_srv_addr));
 
     // Rate counter calculation (only increment if packet went to network interface)
     if (sent > 0)

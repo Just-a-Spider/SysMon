@@ -1,0 +1,11 @@
+post_install() {
+    echo ":: Reloading udev rules and loading uinput module..."
+    modprobe uinput 2>/dev/null || true
+    udevadm control --reload-rules && udevadm trigger || true
+    echo ":: SysMon: Ensure your user is in the 'input' group: sudo usermod -aG input \$USER"
+    echo ":: SysMon: Firewall ports: TCP 7341, TCP 7342, UDP 7339."
+}
+
+post_upgrade() {
+    post_install
+}

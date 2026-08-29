@@ -94,8 +94,9 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
     loop {
         tokio::select! {
             accept_res = listener.accept() => {
-                if let Ok((socket, _)) = accept_res {
+                if let Ok((socket, peer_addr)) = accept_res {
                     let _ = socket.set_nodelay(true);
+                    println!("3DS TCP connection established from {}", peer_addr);
                     let srv = srv_state.clone();
                     tasks.spawn(async move {
                         handle_connection(socket, srv).await;

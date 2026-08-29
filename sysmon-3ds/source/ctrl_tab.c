@@ -124,7 +124,7 @@ void graphics_draw_top_screen_ctrl(u32 held, s16 cx, s16 cy, s16 rx, s16 ry)
     snprintf(str, sizeof(str), "UDP: %s:%d", g_profiles[g_profile_index].ip, g_ctrl_port);
     graphics_draw_dynamic_text(&textObj, str, 20.0f, 206.0f, 0.40f, tc->cyan);
 
-    snprintf(str, sizeof(str), "RATE: %d Hz", g_ctrl_packet_rate > 0 ? g_ctrl_packet_rate : 60);
+    snprintf(str, sizeof(str), "RATE: %d Hz", g_ctrl_packet_rate);
     graphics_draw_dynamic_text(&textObj, str, 190.0f, 206.0f, 0.40f, tc->amber);
 
     const char *map_str = g_ctrl_physical_map ? "MAP: PSP POS" : "MAP: NINTENDO";

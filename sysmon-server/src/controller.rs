@@ -100,9 +100,9 @@ pub fn should_process_packet(seq: u32, last_seq: u32, is_active_session: bool) -
     if seq >= last_seq {
         return true;
     }
-    // Drop late / reordered packet if within short jitter window (e.g. 10000 packets)
+    // Drop late / reordered packet if within short jitter window (e.g. 60 packets)
     // and not a sequence wrap-around
-    if (last_seq - seq) < 10000 {
+    if (last_seq - seq) < 60 {
         return false;
     }
     true
@@ -176,17 +176,17 @@ pub async fn run_controller_server(port: u16, pin: u32) {
     };
 
     #[cfg(target_os = "linux")]
-    let device = match create_virtual_gamepad() {
+    let device: Arc<Mutex<Option<VirtualDevice>>> = match create_virtual_gamepad() {
         Ok(dev) => {
             println!("Initialized SysMon 3DS Virtual Controller on /dev/uinput");
-            Some(Arc::new(Mutex::new(dev)))
+            Arc::new(Mutex::new(Some(dev)))
         }
         Err(e) => {
             eprintln!(
-                "Warning: Could not create /dev/uinput virtual gamepad: {}. (Ensure user has write permissions to /dev/uinput or udev rule is installed)",
+                "Warning: Could not create /dev/uinput virtual gamepad: {}. (Will auto-retry on incoming packets once uinput is available)",
                 e
             );
-            None
+            Arc::new(Mutex::new(None))
         }
     };
 
@@ -211,7 +211,8 @@ pub async fn run_controller_server(port: u16, pin: u32) {
 
     // Watchdog Task: Zeroes out axes and releases buttons if no packet received for >200ms
     #[cfg(target_os = "linux")]
-    if let Some(dev_watchdog) = device.clone() {
+    {
+        let dev_watchdog = device.clone();
         let last_time_clone = last_packet_time.clone();
         let active_state_clone = has_active_state.clone();
         let last_seq_clone = last_seq.clone();
@@ -225,8 +226,10 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                 };
 
                 if elapsed > Duration::from_millis(200) && active_state_clone.load(Ordering::SeqCst) {
-                    let mut dev = dev_watchdog.lock().await;
-                    zero_virtual_gamepad(&mut dev);
+                    let mut lock = dev_watchdog.lock().await;
+                    if let Some(ref mut dev) = *lock {
+                        zero_virtual_gamepad(dev);
+                    }
                     active_state_clone.store(false, Ordering::SeqCst);
                     last_seq_clone.store(0, Ordering::SeqCst);
                 }
@@ -262,7 +265,15 @@ pub async fn run_controller_server(port: u16, pin: u32) {
 
     loop {
         match socket.recv_from(&mut buf).await {
-            Ok((len, _peer)) => {
+            Ok((len, peer)) => {
+                static LAST_LOGGED_PEER: AtomicU64 = AtomicU64::new(0);
+                let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                let last_log = LAST_LOGGED_PEER.load(Ordering::Relaxed);
+                if now_secs.saturating_sub(last_log) >= 5 {
+                    LAST_LOGGED_PEER.store(now_secs, Ordering::Relaxed);
+                    println!("Receiving 3DS UDP controller stream from {}", peer);
+                }
+
                 let packet = match parse_controller_packet(&buf[..len], pin) {
                     Some(p) => p,
                     None => continue,
@@ -282,17 +293,37 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                 has_active_state.store(true, Ordering::SeqCst);
 
                 #[cfg(target_os = "linux")]
-                if let Some(ref dev_arc) = device {
-                    let mut dev = dev_arc.lock().await;
-                    apply_gamepad_state(
-                        &mut dev,
-                        packet.buttons,
-                        packet.circle_x,
-                        packet.circle_y,
-                        packet.right_x,
-                        packet.right_y,
-                        packet.flags,
-                    );
+                {
+                    let mut lock = device.lock().await;
+                    if lock.is_none() {
+                        match create_virtual_gamepad() {
+                            Ok(new_dev) => {
+                                println!("Successfully initialized SysMon 3DS Virtual Controller on /dev/uinput");
+                                *lock = Some(new_dev);
+                            }
+                            Err(e) => {
+                                static LAST_DEV_ERR: AtomicU64 = AtomicU64::new(0);
+                                let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                                let last_e = LAST_DEV_ERR.load(Ordering::Relaxed);
+                                if now_secs.saturating_sub(last_e) >= 5 {
+                                    LAST_DEV_ERR.store(now_secs, Ordering::Relaxed);
+                                    eprintln!("Warning: Failed to create /dev/uinput virtual gamepad: {}", e);
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ref mut dev) = *lock {
+                        apply_gamepad_state(
+                            dev,
+                            packet.buttons,
+                            packet.circle_x,
+                            packet.circle_y,
+                            packet.right_x,
+                            packet.right_y,
+                            packet.flags,
+                        );
+                    }
                 }
 
                 #[cfg(target_os = "windows")]
@@ -587,4 +618,3 @@ mod tests {
         assert_eq!(state.right_y, 200);
     }
 }
-

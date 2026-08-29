@@ -34,12 +34,12 @@ SysMon consists of three core components:
 
 ## Features
 
-### 🖥️ Top Screen: Live Telemetry HUD
+### Top Screen: Live Telemetry HUD
 - **CPU & GPU**: Real-time load percentages, clock speeds, and temperatures (supporting AMD, Nvidia, and Intel GPUs).
 - **Memory**: Live RAM and Swap utilization gauges.
 - **Sensors & System**: Fan RPMs, network I/O activity, and system uptime.
 
-### 📱 Bottom Screen: Interactive Touch Tabs
+### Bottom Screen: Interactive Touch Tabs
 1. **`POMO` (Pomodoro Timer)**: Built-in focus timer with audible alert chime (`A` to toggle start/pause, `Y` to reset).
 2. **`LEVEL` (Audio Level Visualizer)**: Real-time PC master volume and visual audio meter.
 3. **`KILL` (Hang Hunter)**: Live process manager showing the heaviest CPU/RAM hogs. Tap any process to instantly terminate it (`SIGKILL`).
@@ -96,7 +96,18 @@ cargo generate-rpm
 sudo rpm -i target/generate-rpm/sysmon-server-*.rpm
 ```
 
-#### Option B: Run Directly via Cargo
+#### Option B: Arch Linux / CachyOS / Manjaro
+Run the universal installer script:
+```bash
+./install-arch.sh
+```
+Or build the native package using `makepkg`:
+```bash
+cd sysmon-server/packaging
+makepkg -si
+```
+
+#### Option C: Run Directly via Cargo
 ```bash
 cd sysmon-server
 cargo run --release
