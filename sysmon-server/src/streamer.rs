@@ -439,6 +439,7 @@ async fn handle_stream_client(socket: TcpStream, state: Arc<StreamerState>) {
                 let opt_fd = state.active_pw_fd.lock().ok().and_then(|f| f.as_ref().map(|x| x.as_raw_fd()));
 
                 let mut cmd = tokio::process::Command::new("gst-launch-1.0");
+                cmd.kill_on_drop(true);
                 let mut args = vec!["-q".to_string(), "pipewiresrc".to_string()];
 
                 if let Some(fd_num) = opt_fd {

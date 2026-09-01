@@ -189,6 +189,14 @@ fn main() {
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
+            // Listen for SIGINT / Ctrl+C in terminal console
+            tokio::spawn(async {
+                if let Ok(()) = tokio::signal::ctrl_c().await {
+                    println!("\nShutting down SysMon Server...");
+                    std::process::exit(0);
+                }
+            });
+
             // Spawn the web config server
             let web_port = web_state.lock().await.config.web_port;
             tokio::spawn(async move {
@@ -361,6 +369,7 @@ fn main() {
         if let Ok(event) = menu_channel.try_recv() {
             if event.id == quit_i.id() {
                 *control_flow = ControlFlow::Exit;
+                std::process::exit(0);
             } else if event.id == web_i.id() {
                 let web_port = state.blocking_lock().config.web_port;
                 let _ = open::that(format!("http://127.0.0.1:{}/config", web_port));
