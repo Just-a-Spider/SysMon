@@ -15,6 +15,7 @@
 // Network Facade API
 // ---------------------------------------------------------------------------
 Result network_init(const char *ip, int port);
+void   network_switch_profile(int profile_idx);
 void   network_exit(void);
 
 #endif

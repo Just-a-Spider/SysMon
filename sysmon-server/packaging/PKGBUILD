@@ -1,0 +1,30 @@
+# Maintainer: Just-a-Spider <andre_arg_0116@outlook.com>
+pkgname=sysmon-server
+pkgver=0.3.2
+pkgrel=1
+pkgdesc="Background telemetry daemon, uinput gamepad driver, and macro engine for SysMon 3DS"
+arch=('x86_64')
+url="https://github.com/Just-a-Spider/SysMon"
+license=('MIT')
+depends=('gtk3' 'xdotool')
+makedepends=('cargo')
+optdepends=(
+    'pipewire: Experimental screen streaming (CAM tab)'
+    'xdg-desktop-portal: Screencast portal integration'
+)
+install=sysmon-server.install
+
+build() {
+    cd "${srcdir}/.."
+    cargo build --release --locked
+}
+
+package() {
+    cd "${srcdir}/.."
+    install -Dm755 "target/release/sysmon-server" "${pkgdir}/usr/bin/sysmon-server"
+    install -Dm644 "packaging/sysmon-server.desktop" "${pkgdir}/usr/share/applications/sysmon-server.desktop"
+    install -Dm644 "packaging/99-sysmon-uinput.rules" "${pkgdir}/usr/lib/udev/rules.d/99-sysmon-uinput.rules"
+    install -Dm644 "packaging/sysmon-uinput.conf" "${pkgdir}/usr/lib/modules-load.d/sysmon-uinput.conf"
+    install -Dm644 "../sysmon-3ds/icon.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/sysmon-server.png"
+    install -Dm644 "../LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

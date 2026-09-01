@@ -15,6 +15,7 @@ extern u64 g_cam_last_frame_time;
 
 Result net_cam_start(void);
 void   net_cam_stop(void);
+void   net_cam_reconnect(void);
 void   network_cam_start(void);
 void   network_cam_stop(void);
 void   network_cam_send_cmd(char cmd);

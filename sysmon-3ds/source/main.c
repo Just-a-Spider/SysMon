@@ -169,11 +169,7 @@ static void set_apply_and_save_theme(int idx)
 
 static void set_apply_and_save_server(int idx)
 {
-    g_profile_index = idx;
-    network_save_profiles();
-    strncpy(g_auth_key, g_profiles[g_profile_index].pin, sizeof(g_auth_key) - 1);
-    network_exit();
-    network_init(g_profiles[g_profile_index].ip, g_profiles[g_profile_index].port);
+    network_switch_profile(idx);
     audio_play_confirm();
 }
 

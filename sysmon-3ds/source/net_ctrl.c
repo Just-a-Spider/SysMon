@@ -29,7 +29,7 @@ Result net_ctrl_start(const char *ip, int port)
         s_ctrl_sock = -1;
     }
 
-    s_ctrl_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    s_ctrl_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (s_ctrl_sock < 0)
         return -1;
 
