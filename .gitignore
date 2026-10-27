@@ -3,6 +3,7 @@
 
 # 3DS Build Artifacts
 sysmon-3ds/build/
+sysmon-3ds/build-cam/
 sysmon-3ds/*.elf
 sysmon-3ds/*.3dsx
 sysmon-3ds/*.cia
@@ -22,3 +23,4 @@ sysmon-web/.angular/
 
 # Other
 assets/avatar.png
+.deckforge/

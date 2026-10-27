@@ -272,9 +272,19 @@ int main(void)
             }
         }
 
-        // SELECT toggles fetching
+        // SELECT toggles fetching or retries connection if in error state
         if (kDown & KEY_SELECT)
-            g_fetching_enabled = !g_fetching_enabled;
+        {
+            if (g_http_status == -1)
+            {
+                g_fetching_enabled = 1;
+                net_telemetry_reconnect();
+            }
+            else
+            {
+                g_fetching_enabled = !g_fetching_enabled;
+            }
+        }
 
         u64 now = osGetTime();
 

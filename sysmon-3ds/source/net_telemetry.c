@@ -282,68 +282,29 @@ static void net_thread_func(void *arg)
             continue;
         }
 
-        int flag = 1;
-        setsockopt(g_socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
-
-        // Set non-blocking before connect to avoid hanging main loop on disconnect
-        int flags = fcntl(g_socket, F_GETFL, 0);
-        fcntl(g_socket, F_SETFL, flags | O_NONBLOCK);
-
         struct sockaddr_in srv_addr;
         memset(&srv_addr, 0, sizeof(srv_addr));
         srv_addr.sin_family = AF_INET;
         srv_addr.sin_port = htons(g_srv_port);
         inet_pton(AF_INET, g_srv_ip, &srv_addr.sin_addr);
 
-        int c_res = connect(g_socket, (struct sockaddr *)&srv_addr, sizeof(srv_addr));
-        if (c_res < 0)
+        if (connect(g_socket, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0)
         {
-            if (errno == EINPROGRESS)
-            {
-                struct timeval tv;
-                tv.tv_sec = 1;
-                tv.tv_usec = 500000; // 1.5 second connect timeout
-                fd_set wset;
-                FD_ZERO(&wset);
-                FD_SET(g_socket, &wset);
-
-                int sel_res = select(g_socket + 1, NULL, &wset, NULL, &tv);
-                if (sel_res <= 0)
-                {
-                    // Timeout or select error
-                    shutdown(g_socket, SHUT_RDWR);
-                    close(g_socket);
-                    g_socket = -1;
-                    g_http_status = -1;
-                    if (g_net_running)
-                        svcSleepThread(500 * 1000000LL);
-                    continue;
-                }
-
-                int sock_err = 0;
-                socklen_t err_len = sizeof(sock_err);
-                if (getsockopt(g_socket, SOL_SOCKET, SO_ERROR, &sock_err, &err_len) < 0 || sock_err != 0)
-                {
-                    shutdown(g_socket, SHUT_RDWR);
-                    close(g_socket);
-                    g_socket = -1;
-                    g_http_status = -1;
-                    if (g_net_running)
-                        svcSleepThread(500 * 1000000LL);
-                    continue;
-                }
-            }
-            else
-            {
-                shutdown(g_socket, SHUT_RDWR);
-                close(g_socket);
-                g_socket = -1;
-                g_http_status = -1;
-                if (g_net_running)
-                    svcSleepThread(500 * 1000000LL);
-                continue;
-            }
+            shutdown(g_socket, SHUT_RDWR);
+            close(g_socket);
+            g_socket = -1;
+            g_http_status = -1;
+            if (g_net_running)
+                svcSleepThread(500 * 1000000LL);
+            continue;
         }
+
+        int flag = 1;
+        setsockopt(g_socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
+
+        // Set non-blocking mode on connected socket for responsive polling & shutdown
+        int flags = fcntl(g_socket, F_GETFL, 0);
+        fcntl(g_socket, F_SETFL, flags | O_NONBLOCK);
 
         g_http_status = 1; // connected
         char buf[8192];
@@ -441,7 +402,7 @@ void net_telemetry_stop(void)
     net_telemetry_reconnect();
     if (net_thread)
     {
-        threadJoin(net_thread, U64_MAX);
+        threadJoin(net_thread, 1000000000ULL); // 1-second timeout
         threadFree(net_thread);
         net_thread = NULL;
     }

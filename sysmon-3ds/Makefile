@@ -18,18 +18,19 @@ endif
 
 ifeq ($(ENABLE_CAM),1)
 	TARGET := sysmon-3ds-cam
+	BUILD  := build-cam
 else
 	override ENABLE_CAM := 0
 	TARGET := sysmon-3ds
+	BUILD  := build
 	CFLAGS += -DDISABLE_CAM=1
 endif
 
 export TARGET
 export ENABLE_CAM
+export BUILD
 
 include $(DEVKITARM)/3ds_rules
-
-BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
@@ -203,7 +204,7 @@ endif
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
+	@rm -fr build build-cam $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
 		sysmon-3ds.3dsx sysmon-3ds.smdh sysmon-3ds.elf sysmon-3ds.cia \
 		sysmon-3ds-nocam.3dsx sysmon-3ds-nocam.smdh sysmon-3ds-nocam.elf sysmon-3ds-nocam.cia \
 		sysmon-3ds-cam.3dsx sysmon-3ds-cam.smdh sysmon-3ds-cam.elf sysmon-3ds-cam.cia \

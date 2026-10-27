@@ -262,7 +262,35 @@ fn get_volume_level() -> u8 {
     72
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+fn get_volume_level() -> u8 {
+    use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::Media::Audio::{MMDeviceEnumerator, IMMDeviceEnumerator, eRender, eConsole};
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let enumerator: IMMDeviceEnumerator = match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            Ok(e) => e,
+            Err(_) => return 72,
+        };
+        let device = match enumerator.GetDefaultAudioEndpoint(eRender, eConsole) {
+            Ok(d) => d,
+            Err(_) => return 72,
+        };
+        let endpoint: IAudioEndpointVolume = match device.Activate(CLSCTX_ALL, None) {
+            Ok(ep) => ep,
+            Err(_) => return 72,
+        };
+        let mut level: f32 = 0.0;
+        if endpoint.GetMasterVolumeLevelScalar(&mut level).is_ok() {
+            return (level * 100.0).round() as u8;
+        }
+        72
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn get_volume_level() -> u8 {
     72
 }
@@ -300,7 +328,39 @@ fn get_brightness_level() -> u8 {
     48
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+static WINDOWS_BRIGHTNESS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(50);
+
+#[cfg(target_os = "windows")]
+fn get_brightness_level() -> u8 {
+    use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTOPRIMARY};
+    use windows::Win32::Devices::Display::{GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, DestroyPhysicalMonitors, GetMonitorBrightness, PHYSICAL_MONITOR};
+
+    unsafe {
+        let hwnd = GetDesktopWindow();
+        let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+        let mut count = 0u32;
+        if GetNumberOfPhysicalMonitorsFromHMONITOR(hmon, &mut count).is_ok() && count > 0 {
+            let mut monitors = vec![PHYSICAL_MONITOR::default(); count as usize];
+            if GetPhysicalMonitorsFromHMONITOR(hmon, &mut monitors).is_ok() {
+                let mut min_b = 0u32;
+                let mut cur_b = 0u32;
+                let mut max_b = 0u32;
+                let res = GetMonitorBrightness(monitors[0].hPhysicalMonitor, &mut min_b, &mut cur_b, &mut max_b);
+                let _ = DestroyPhysicalMonitors(&monitors);
+                if res != 0 && max_b > min_b {
+                    let pct = (((cur_b - min_b) as f32 / (max_b - min_b) as f32) * 100.0) as u8;
+                    WINDOWS_BRIGHTNESS.store(pct, std::sync::atomic::Ordering::Relaxed);
+                    return pct;
+                }
+            }
+        }
+    }
+    WINDOWS_BRIGHTNESS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn get_brightness_level() -> u8 {
     50
 }
@@ -431,7 +491,32 @@ pub fn set_volume_level(level: u8) {
     ]);
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+pub fn set_volume_level(level: u8) {
+    let scalar = (clamp_percent(level) as f32 / 100.0).clamp(0.0, 1.0);
+    use windows::Win32::System::Com::{CoInitializeEx, CoCreateInstance, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::Media::Audio::{MMDeviceEnumerator, IMMDeviceEnumerator, eRender, eConsole};
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let enumerator: IMMDeviceEnumerator = match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        let device = match enumerator.GetDefaultAudioEndpoint(eRender, eConsole) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let endpoint: IAudioEndpointVolume = match device.Activate(CLSCTX_ALL, None) {
+            Ok(ep) => ep,
+            Err(_) => return,
+        };
+        let _ = endpoint.SetMasterVolumeLevelScalar(scalar, std::ptr::null());
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn set_volume_level(_level: u8) {}
 
 #[cfg(target_os = "linux")]
@@ -465,7 +550,49 @@ pub fn set_brightness_level(level: u8) {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+pub fn set_brightness_level(level: u8) {
+    let level = clamp_percent(level);
+    WINDOWS_BRIGHTNESS.store(level, std::sync::atomic::Ordering::Relaxed);
+
+    use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTOPRIMARY};
+    use windows::Win32::Devices::Display::{GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, DestroyPhysicalMonitors, SetMonitorBrightness, PHYSICAL_MONITOR};
+
+    let mut handled_via_dxva2 = false;
+    unsafe {
+        let hwnd = GetDesktopWindow();
+        let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+        let mut count = 0u32;
+        if GetNumberOfPhysicalMonitorsFromHMONITOR(hmon, &mut count).is_ok() && count > 0 {
+            let mut monitors = vec![PHYSICAL_MONITOR::default(); count as usize];
+            if GetPhysicalMonitorsFromHMONITOR(hmon, &mut monitors).is_ok() {
+                for m in &monitors {
+                    if SetMonitorBrightness(m.hPhysicalMonitor, level as u32) != 0 {
+                        handled_via_dxva2 = true;
+                    }
+                }
+                let _ = DestroyPhysicalMonitors(&monitors);
+            }
+        }
+    }
+
+    if !handled_via_dxva2 {
+        // Fallback for laptop internal displays via WMI PowerShell
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let script = format!(
+            "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods).WmiSetBrightness(1, {})",
+            level
+        );
+        let _ = Command::new("powershell")
+            .args(&["-NoProfile", "-NonInteractive", "-Command", &script])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub fn set_brightness_level(_level: u8) {}
 
 use enigo::{Enigo, Keyboard, Key, Direction};
