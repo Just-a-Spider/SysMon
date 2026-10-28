@@ -282,8 +282,7 @@ fn get_volume_level() -> u8 {
             Ok(ep) => ep,
             Err(_) => return 72,
         };
-        let mut level: f32 = 0.0;
-        if endpoint.GetMasterVolumeLevelScalar(&mut level).is_ok() {
+        if let Ok(level) = endpoint.GetMasterVolumeLevelScalar() {
             return (level * 100.0).round() as u8;
         }
         72
@@ -389,26 +388,28 @@ pub fn get_windows_now_playing() -> String {
     static FOUND_TITLE: Mutex<String> = Mutex::new(String::new());
 
     unsafe extern "system" fn enum_proc(hwnd: HWND, _: LPARAM) -> BOOL {
-        if IsWindowVisible(hwnd) != 0 {
-            let mut buf = [0u16; 512];
-            let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
-            if len > 0 {
-                let title = String::from_utf16_lossy(&buf[..len as usize]);
-                let title_low = title.to_lowercase();
-                if title_low.contains(" - youtube") 
-                    || title_low.contains("spotify") 
-                    || title_low.contains("vlc media player")
-                    || title_low.contains(" - soundcloud") {
-                    if let Ok(mut lock) = FOUND_TITLE.lock() {
-                        let cleaned = title
-                            .replace(" - YouTube - Microsoft​ Edge", "")
-                            .replace(" - YouTube - Microsoft Edge", "")
-                            .replace(" - YouTube - Google Chrome", "")
-                            .replace(" - YouTube - Mozilla Firefox", "")
-                            .replace(" - VLC media player", "");
-                        *lock = cleaned;
+        unsafe {
+            if IsWindowVisible(hwnd) != 0 {
+                let mut buf = [0u16; 512];
+                let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), 512);
+                if len > 0 {
+                    let title = String::from_utf16_lossy(&buf[..len as usize]);
+                    let title_low = title.to_lowercase();
+                    if title_low.contains(" - youtube") 
+                        || title_low.contains("spotify") 
+                        || title_low.contains("vlc media player")
+                        || title_low.contains(" - soundcloud") {
+                        if let Ok(mut lock) = FOUND_TITLE.lock() {
+                            let cleaned = title
+                                .replace(" - YouTube - Microsoft​ Edge", "")
+                                .replace(" - YouTube - Microsoft Edge", "")
+                                .replace(" - YouTube - Google Chrome", "")
+                                .replace(" - YouTube - Mozilla Firefox", "")
+                                .replace(" - VLC media player", "");
+                            *lock = cleaned;
+                        }
+                        return 0; // stop enumerating
                     }
-                    return 0; // stop enumerating
                 }
             }
         }
@@ -466,7 +467,6 @@ pub fn kill_proc(pid: u32) {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn clamp_percent(value: u8) -> u8 {
     value.min(100)
 }
