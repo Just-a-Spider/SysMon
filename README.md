@@ -5,9 +5,13 @@
 [![Platform: 3DS](https://img.shields.io/badge/Platform-Nintendo%203DS-red)](https://github.com/devkitPro/libctru)
 [![Backend: Rust](https://img.shields.io/badge/Server-Rust%202024-orange)](https://www.rust-lang.org/)
 
-SysMon turns your Nintendo 3DS into a secondary PC telemetry monitor, wireless macro pad, and virtual gamepad controller. Built in Rust and C with hardware-accelerated rendering.
+SysMon turns your Nintendo 3DS into a secondary PC telemetry monitor, wireless macro pad, and virtual gamepad controller. Built in Rust and C.
 
-The project connects your Linux PC and Nintendo 3DS over Wi-Fi, displaying real-time hardware metrics on the top screen while providing interactive tools and touch controls on the bottom screen.
+The project connects your PC (Linux or Windows) and Nintendo 3DS over Wi-Fi, displaying real-time hardware metrics on the top screen while providing interactive tools and touch controls on the bottom screen.
+
+<p align="center">
+  <img src="assets/screenshots/sysmon_dual_hud.png" alt="SysMon Dual Screen Interface" width="450" />
+</p>
 
 ---
 
@@ -26,7 +30,7 @@ SysMon is officially indexed in **[Universal-DB](https://db.universal-team.net/3
 ## How It Works
 
 SysMon consists of three core components:
-- **`sysmon-server`**: A lightweight Rust daemon that lives in your Linux system tray. It gathers hardware statistics (CPU, GPU, RAM, sensors), dispatches macro commands, manages the virtual gamepad via kernel `/dev/uinput`, and communicates with the 3DS.
+- **`sysmon-server`**: A lightweight Rust daemon that lives in your Linux or Windows system tray. It gathers hardware statistics (CPU, GPU, RAM, sensors), dispatches macro commands, manages the virtual gamepad (via Linux kernel `/dev/uinput` or Windows ViGEmBus), and communicates with the 3DS.
 - **`sysmon-web`**: An embedded web dashboard served by the background daemon for configuring ports, PINs, RAM sorting, and macros locally, or viewing live telemetry on mobile devices.
 - **`sysmon-3ds`**: A native Nintendo 3DS homebrew application written in C using `citro2d` / `citro3d` with sound effects and custom theme support.
 
@@ -35,22 +39,46 @@ SysMon consists of three core components:
 ## Features
 
 ### Top Screen: Live Telemetry HUD
-- **CPU & GPU**: Real-time load percentages, clock speeds, and temperatures (supporting AMD, Nvidia, and Intel GPUs).
-- **Memory**: Live RAM and Swap utilization gauges.
-- **Sensors & System**: Fan RPMs, network I/O activity, and system uptime.
+
+<p align="center">
+  <img src="assets/screenshots/telemetry_top.png" alt="SysMon Top Screen Telemetry HUD" width="460" />
+</p>
+
+The top screen presents an overview of host PC hardware status organized into four HUD panels and a status footer:
+
+| Panel | Metric Displayed | Visual Bar / Gauge | Details & Behavior |
+|---|---|---|---|
+| **Top-Left (CPU)** | CPU Utilization (`%`) | **20-segment amber bar** | Real-time processor load across all CPU cores (`0%` to `100%`). |
+| **Top-Left (CPU)** | CPU Temp (`°C`) & Fan (`RPM`) | **20-segment thermal bar** | Core package temperature and active fan speed. Color transitions: **Cyan/Normal** (<60°C), **Amber** (60–80°C), **Danger Red** (>80°C). |
+| **Top-Right (GPU)** | GPU Model Name | Header text | Detects active dedicated GPU (NVIDIA, AMD Radeon, or Intel Arc). |
+| **Top-Right (GPU)** | GPU Temp (`°C`) & Fan (`RPM`) | **20-segment thermal bar** | Core temperature and fan speed. **Note:** SysMon monitors GPU temperature and fan speed; this gauge represents temperature, not GPU load percentage. |
+| **Top-Right (RAM)** | Available Memory (`FREE RAM`) | Numeric readout (`GB`) | Real-time free physical RAM available on host. |
+| **Bottom-Left** | Thermal History Graph | **2-line real-time chart** | Displays temperature trends over the last 10 polling intervals. **Amber line** = CPU temperature; **Cyan line** = GPU temperature. |
+| **Bottom-Right** | Digital Clock & Weather | Digital clock + text | Synchronized local time (`HH:MM`) and live weather condition/temperature fetched from wttr.in. |
+| **Footer (Left)** | Connection State | Status text indicator | `TCP: CONNECTED` (Cyan), `TCP: CONNECTING` (Amber), or `TCP: ERROR` (Red). Press `SELECT` to toggle low-power pause or trigger reconnect. |
+| **Footer (Right)** | 3DS Battery & Power | Battery percentage text | 3DS battery gauge (`BAT 20%`–`BAT 100%`) or active charging status (`CHG`). |
+
+---
 
 ### Bottom Screen: Interactive Touch Tabs
+
+<p align="center">
+  <img src="assets/screenshots/macro_bot.png" alt="SysMon Macro Pad Tab" width="280" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/screenshots/sysmon_dual_ctrl.png" alt="SysMon Gamepad Controller" width="280" />
+</p>
+
 1. **`POMO` (Pomodoro Timer)**: Built-in focus timer with audible alert chime (`A` to toggle start/pause, `Y` to reset).
-2. **`LEVEL` (Audio Level Visualizer)**: Real-time PC master volume and visual audio meter.
-3. **`KILL` (Hang Hunter)**: Live process manager showing the heaviest CPU/RAM hogs. Tap any process to instantly terminate it (`SIGKILL`).
-4. **`MACRO` (Macro Pad)**: Touch macro pad (`T1`–`T8`) and physical button shortcut triggers.
-5. **`MEDIA` (Media Controls)**: Native Linux MPRIS integration to control Spotify, browsers, and media players (Play/Pause, Next, Previous, Volume).
-6. **`CTRL` (Virtual Gamepad)**: Turns your 3DS into a low-latency PC game controller via Linux `uinput` (Circle Pad, D-Pad, ABXY, L/R, ZL/ZR). Includes a safety emergency exit (hold the top-right touch corner for 1.5s to release grab).
+2. **`LEVEL` (Audio & Brightness Sliders)**: Real-time PC master volume and visual audio meter, plus display brightness controls.
+3. **`KILL` (Process Manager)**: Live process list showing the heaviest CPU/RAM consumers. Tap any process and confirm with `A` to terminate it (`SIGKILL`).
+4. **`MACRO` (Macro Pad)**: Touch macro pad (`T1`–`T8`) to trigger shell commands, key combos, URLs, or text inputs defined in Web Config.
+5. **`MEDIA` (Media Controls)**: Native MPRIS (Linux) and window-title media player integration (Spotify, YouTube, VLC) with Play/Pause, Next, Previous, and volume adjustments.
+6. **`CTRL` (Virtual Gamepad)**: Turns your 3DS into a low-latency PC game controller via Linux `/dev/uinput` or Windows ViGEmBus (Circle Pad, D-Pad, ABXY, L/R, ZL/ZR). Emergency exit: hold top-right touch corner for 1.5s to release grab.
 7. **`SET` (Settings & Profiles)**:
    - **Themes**: Switch between built-in color schemes (Cyberpunk Amber, Matrix Green, Midnight Blue, Solarized, Monochrome) or create/edit custom palettes with live swatch previews.
    - **Servers**: Multi-server profile manager to configure and switch between multiple host PCs directly on the 3DS.
 8. **`CAM` (Screen Streaming - *Optional / Experimental*)**: Mirrors your PC monitor to the 3DS top screen using PipeWire / Wayland portal or X11 capture with delta compression.
-   > **Note:** Created purely as an experiment; tested on an Old 3DS with awful results due to hardware/Wi-Fi bottlenecks. Not recommended for daily use.
+   > **Note:** Created purely as an experiment; tested on an Old 3DS with awful results due to hardware/Wi-Fi bottlenecks. Not recommended.
 
 ---
 

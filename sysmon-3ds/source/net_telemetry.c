@@ -43,6 +43,7 @@ u64 g_last_level_touch_time = 0;
 static int g_socket = -1;
 static Thread net_thread = NULL;
 static volatile int g_net_running = 0;
+static volatile int g_telemetry_reconnect_req = 0;
 static LightLock send_lock;
 
 static void parse_telemetry(const char *json)
@@ -260,6 +261,8 @@ static void net_thread_func(void *arg)
     extern int g_screen_mode;
     while (g_net_running)
     {
+        g_telemetry_reconnect_req = 0;
+
         if (!g_fetching_enabled || g_screen_mode == 7)
         {
             if (g_socket >= 0)
@@ -277,15 +280,15 @@ static void net_thread_func(void *arg)
         if (g_socket < 0)
         {
             g_http_status = -1;
-            if (g_net_running)
-                svcSleepThread(500 * 1000000LL);
+            for (int i = 0; i < 30 && g_net_running && !g_telemetry_reconnect_req; i++)
+                svcSleepThread(100 * 1000000LL);
             continue;
         }
 
         int flag = 1;
         setsockopt(g_socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(int));
 
-        // Set non-blocking before connect to avoid hanging main loop on disconnect
+        // Non-blocking mode before connect for responsive timeout & cooperative cancellation
         int flags = fcntl(g_socket, F_GETFL, 0);
         fcntl(g_socket, F_SETFL, flags | O_NONBLOCK);
 
@@ -296,53 +299,59 @@ static void net_thread_func(void *arg)
         inet_pton(AF_INET, g_srv_ip, &srv_addr.sin_addr);
 
         int c_res = connect(g_socket, (struct sockaddr *)&srv_addr, sizeof(srv_addr));
-        if (c_res < 0)
+        int connected = 0;
+
+        if (c_res == 0)
         {
-            if (errno == EINPROGRESS)
+            connected = 1;
+        }
+        else if (errno == EINPROGRESS)
+        {
+            // 4.0s timeout sliced in 100ms intervals for rapid UI response
+            for (int elapsed = 0; elapsed < 4000; elapsed += 100)
             {
-                struct timeval tv;
-                tv.tv_sec = 1;
-                tv.tv_usec = 500000; // 1.5 second connect timeout
+                if (!g_net_running || g_telemetry_reconnect_req || !g_fetching_enabled || g_screen_mode == 7)
+                    break;
+
                 fd_set wset;
                 FD_ZERO(&wset);
                 FD_SET(g_socket, &wset);
 
-                int sel_res = select(g_socket + 1, NULL, &wset, NULL, &tv);
-                if (sel_res <= 0)
-                {
-                    // Timeout or select error
-                    shutdown(g_socket, SHUT_RDWR);
-                    close(g_socket);
-                    g_socket = -1;
-                    g_http_status = -1;
-                    if (g_net_running)
-                        svcSleepThread(500 * 1000000LL);
-                    continue;
-                }
+                struct timeval tv;
+                tv.tv_sec = 0;
+                tv.tv_usec = 100000; // 100ms
 
-                int sock_err = 0;
-                socklen_t err_len = sizeof(sock_err);
-                if (getsockopt(g_socket, SOL_SOCKET, SO_ERROR, &sock_err, &err_len) < 0 || sock_err != 0)
+                int sel_res = select(g_socket + 1, NULL, &wset, NULL, &tv);
+                if (sel_res > 0)
                 {
-                    shutdown(g_socket, SHUT_RDWR);
-                    close(g_socket);
-                    g_socket = -1;
-                    g_http_status = -1;
-                    if (g_net_running)
-                        svcSleepThread(500 * 1000000LL);
-                    continue;
+                    struct sockaddr_in peer;
+                    socklen_t peer_len = sizeof(peer);
+                    if (getpeername(g_socket, (struct sockaddr *)&peer, &peer_len) == 0)
+                    {
+                        connected = 1;
+                    }
+                    break;
+                }
+                else if (sel_res < 0)
+                {
+                    break;
                 }
             }
-            else
+        }
+
+        if (!connected || !g_net_running || g_telemetry_reconnect_req || !g_fetching_enabled || g_screen_mode == 7)
+        {
+            shutdown(g_socket, SHUT_RDWR);
+            close(g_socket);
+            g_socket = -1;
+            g_http_status = -1;
+
+            // Retain error status for 3.0s, waking immediately if settings changed or SELECT pressed
+            for (int i = 0; i < 30 && g_net_running && !g_telemetry_reconnect_req && g_screen_mode != 7 && g_fetching_enabled; i++)
             {
-                shutdown(g_socket, SHUT_RDWR);
-                close(g_socket);
-                g_socket = -1;
-                g_http_status = -1;
-                if (g_net_running)
-                    svcSleepThread(500 * 1000000LL);
-                continue;
+                svcSleepThread(100 * 1000000LL);
             }
+            continue;
         }
 
         g_http_status = 1; // connected
@@ -350,7 +359,7 @@ static void net_thread_func(void *arg)
         memset(buf, 0, sizeof(buf));
         int total_len = 0;
 
-        while (g_net_running && g_fetching_enabled && g_screen_mode != 7)
+        while (g_net_running && g_fetching_enabled && g_screen_mode != 7 && !g_telemetry_reconnect_req)
         {
             int recvd = recv(g_socket, buf + total_len, sizeof(buf) - total_len - 1, 0);
 
@@ -412,8 +421,12 @@ static void net_thread_func(void *arg)
             g_socket = -1;
         }
         g_http_status = -1;
-        if (g_net_running)
-            svcSleepThread(500 * 1000000LL);
+
+        // Disconnected: retain error state for 1.5s unless reconnect requested
+        for (int i = 0; i < 15 && g_net_running && !g_telemetry_reconnect_req && g_screen_mode != 7 && g_fetching_enabled; i++)
+        {
+            svcSleepThread(100 * 1000000LL);
+        }
     }
 }
 
@@ -421,29 +434,32 @@ Result net_telemetry_start(void)
 {
     LightLock_Init(&send_lock);
     g_net_running = 1;
+    g_telemetry_reconnect_req = 0;
     net_thread = threadCreate(net_thread_func, NULL, 32768, 0x3f, -2, false);
     return net_thread ? 0 : -1;
 }
 
 void net_telemetry_reconnect(void)
 {
-    if (g_socket >= 0)
-    {
-        shutdown(g_socket, SHUT_RDWR);
-        close(g_socket);
-        g_socket = -1;
-    }
+    // Cooperative reconnect request: worker thread safely closes its own socket
+    g_telemetry_reconnect_req = 1;
 }
 
 void net_telemetry_stop(void)
 {
     g_net_running = 0;
-    net_telemetry_reconnect();
+    g_telemetry_reconnect_req = 1;
     if (net_thread)
     {
-        threadJoin(net_thread, U64_MAX);
+        threadJoin(net_thread, 1000000000ULL); // 1-second timeout
         threadFree(net_thread);
         net_thread = NULL;
+    }
+    if (g_socket >= 0)
+    {
+        shutdown(g_socket, SHUT_RDWR);
+        close(g_socket);
+        g_socket = -1;
     }
 }
 

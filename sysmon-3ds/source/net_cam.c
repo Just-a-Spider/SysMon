@@ -29,6 +29,7 @@ static int g_cam_socket = -1;
 static Thread cam_thread = NULL;
 static volatile int g_cam_running = 0;
 static volatile int g_cam_want_stream = 0;
+static volatile int g_cam_reconnect_req = 0;
 
 static u8 frame_payload[512 * 256 * 2 + 65536];
 
@@ -39,6 +40,17 @@ static void cam_thread_func(void *arg)
 
     while (g_cam_running)
     {
+        if (g_cam_reconnect_req)
+        {
+            g_cam_reconnect_req = 0;
+            if (g_cam_socket >= 0)
+            {
+                shutdown(g_cam_socket, SHUT_RDWR);
+                close(g_cam_socket);
+                g_cam_socket = -1;
+            }
+        }
+
         if (!g_cam_want_stream)
         {
             if (g_cam_socket >= 0)
@@ -56,7 +68,8 @@ static void cam_thread_func(void *arg)
             g_cam_socket = socket(AF_INET, SOCK_STREAM, 0);
             if (g_cam_socket < 0)
             {
-                svcSleepThread(500 * 1000000LL);
+                for (int i = 0; i < 5 && g_cam_running && g_cam_want_stream && !g_cam_reconnect_req; i++)
+                    svcSleepThread(100 * 1000000LL);
                 continue;
             }
 
@@ -66,23 +79,65 @@ static void cam_thread_func(void *arg)
             int rcvbuf = 65536;
             setsockopt(g_cam_socket, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(int));
 
+            // Set non-blocking before connect for timeout handling & responsive cancellation
+            int flags = fcntl(g_cam_socket, F_GETFL, 0);
+            fcntl(g_cam_socket, F_SETFL, flags | O_NONBLOCK);
+
             struct sockaddr_in srv_addr;
             memset(&srv_addr, 0, sizeof(srv_addr));
             srv_addr.sin_family = AF_INET;
             srv_addr.sin_port = htons(g_stream_port);
             inet_pton(AF_INET, g_srv_ip, &srv_addr.sin_addr);
 
-            if (connect(g_cam_socket, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0)
+            int c_res = connect(g_cam_socket, (struct sockaddr *)&srv_addr, sizeof(srv_addr));
+            int cam_connected = 0;
+
+            if (c_res == 0)
             {
-                close(g_cam_socket);
-                g_cam_socket = -1;
-                svcSleepThread(500 * 1000000LL);
-                continue;
+                cam_connected = 1;
+            }
+            else if (errno == EINPROGRESS)
+            {
+                for (int elapsed = 0; elapsed < 4000; elapsed += 100)
+                {
+                    if (!g_cam_running || !g_cam_want_stream || g_cam_reconnect_req)
+                        break;
+
+                    fd_set wset;
+                    FD_ZERO(&wset);
+                    FD_SET(g_cam_socket, &wset);
+
+                    struct timeval tv;
+                    tv.tv_sec = 0;
+                    tv.tv_usec = 100000;
+
+                    int sel_res = select(g_cam_socket + 1, NULL, &wset, NULL, &tv);
+                    if (sel_res > 0)
+                    {
+                        struct sockaddr_in peer;
+                        socklen_t peer_len = sizeof(peer);
+                        if (getpeername(g_cam_socket, (struct sockaddr *)&peer, &peer_len) == 0)
+                        {
+                            cam_connected = 1;
+                        }
+                        break;
+                    }
+                    else if (sel_res < 0)
+                    {
+                        break;
+                    }
+                }
             }
 
-            // Set non-blocking mode for responsive polling & shutdown
-            int flags = fcntl(g_cam_socket, F_GETFL, 0);
-            fcntl(g_cam_socket, F_SETFL, flags | O_NONBLOCK);
+            if (!cam_connected || !g_cam_running || !g_cam_want_stream || g_cam_reconnect_req)
+            {
+                shutdown(g_cam_socket, SHUT_RDWR);
+                close(g_cam_socket);
+                g_cam_socket = -1;
+                for (int i = 0; i < 15 && g_cam_running && g_cam_want_stream && !g_cam_reconnect_req; i++)
+                    svcSleepThread(100 * 1000000LL);
+                continue;
+            }
 
             // Start stream in Delta Tile mode ('SD')
             send(g_cam_socket, "SD", 2, 0);
@@ -92,7 +147,7 @@ static void cam_thread_func(void *arg)
         int hdr_read = 0;
         int err = 0;
 
-        while (hdr_read < 46 && g_cam_running && g_cam_want_stream)
+        while (hdr_read < 46 && g_cam_running && g_cam_want_stream && !g_cam_reconnect_req)
         {
             int r = recv(g_cam_socket, hdr + hdr_read, 46 - hdr_read, 0);
             if (r < 0)
@@ -113,7 +168,7 @@ static void cam_thread_func(void *arg)
             hdr_read += r;
         }
 
-        if (err || !g_cam_want_stream || !g_cam_running)
+        if (err || !g_cam_want_stream || !g_cam_running || g_cam_reconnect_req)
         {
             if (g_cam_socket >= 0)
             {
@@ -164,7 +219,7 @@ static void cam_thread_func(void *arg)
         else
         {
             u32 total_payload = 0;
-            while (total_payload < payload_len && g_cam_running && g_cam_want_stream)
+            while (total_payload < payload_len && g_cam_running && g_cam_want_stream && !g_cam_reconnect_req)
             {
                 int r = recv(g_cam_socket, frame_payload + total_payload, payload_len - total_payload, 0);
                 if (r < 0)
@@ -185,7 +240,7 @@ static void cam_thread_func(void *arg)
                 total_payload += r;
             }
 
-            if (err || !g_cam_want_stream || !g_cam_running || total_payload < payload_len)
+            if (err || !g_cam_want_stream || !g_cam_running || g_cam_reconnect_req || total_payload < payload_len)
             {
                 if (g_cam_socket >= 0)
                 {
@@ -238,30 +293,33 @@ static void cam_thread_func(void *arg)
 Result net_cam_start(void)
 {
     g_cam_running = 1;
+    g_cam_reconnect_req = 0;
     cam_thread = threadCreate(cam_thread_func, NULL, 65536, 0x31, -2, false);
     return cam_thread ? 0 : -1;
 }
 
 void net_cam_reconnect(void)
 {
-    if (g_cam_socket >= 0)
-    {
-        shutdown(g_cam_socket, SHUT_RDWR);
-        close(g_cam_socket);
-        g_cam_socket = -1;
-    }
+    // Cooperative reconnect: worker thread safely closes its own socket
+    g_cam_reconnect_req = 1;
 }
 
 void net_cam_stop(void)
 {
     g_cam_running = 0;
     g_cam_want_stream = 0;
-    net_cam_reconnect();
+    g_cam_reconnect_req = 1;
     if (cam_thread)
     {
-        threadJoin(cam_thread, U64_MAX);
+        threadJoin(cam_thread, 1000000000ULL); // 1-second timeout
         threadFree(cam_thread);
         cam_thread = NULL;
+    }
+    if (g_cam_socket >= 0)
+    {
+        shutdown(g_cam_socket, SHUT_RDWR);
+        close(g_cam_socket);
+        g_cam_socket = -1;
     }
 }
 
