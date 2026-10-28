@@ -1,6 +1,6 @@
 [package]
 name = "sysmon-server"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 license = "MIT"
 description = "SysMon Server for Nintendo 3DS Companion"

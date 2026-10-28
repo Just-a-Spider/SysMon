@@ -1,6 +1,6 @@
 # Maintainer: Just-a-Spider <andre_arg_0116@outlook.com>
 pkgname=sysmon-server
-pkgver=0.3.2
+pkgver=0.3.4
 pkgrel=1
 pkgdesc="Background telemetry daemon, uinput gamepad driver, and macro engine for SysMon 3DS"
 arch=('x86_64')

@@ -1,5 +1,5 @@
 Name:           sysmon-server
-Version:        0.3.3
+Version:        0.3.4
 Release:        1%{?dist}
 Summary:        SysMon Server for Nintendo 3DS Companion
 License:        MIT
