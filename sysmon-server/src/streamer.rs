@@ -124,7 +124,7 @@ pub async fn trigger_os_screencast_picker(state: Arc<StreamerState>) -> Result<S
         use ashpd::desktop::screencast::{CursorMode, Screencast, SourceType, SelectSourcesOptions, StartCastOptions};
         use ashpd::desktop::PersistMode;
 
-        println!("Invoking XDG Desktop Portal ScreenCast dialog...");
+        tracing::info!("Invoking XDG Desktop Portal ScreenCast dialog...");
 
         let proxy = Screencast::new().await.map_err(|e| e.to_string())?;
         let session = proxy.create_session(Default::default()).await.map_err(|e| e.to_string())?;
@@ -143,11 +143,11 @@ pub async fn trigger_os_screencast_picker(state: Arc<StreamerState>) -> Result<S
                 if let Some(stream) = streams_response.streams().first() {
                     let node_id = stream.pipe_wire_node_id();
                     let desc = format!("OS Window/Screen (#{})", node_id);
-                    println!("User selected OS stream node: {}", node_id);
+                    tracing::info!("User selected OS stream node: {}", node_id);
 
                     // Request authenticated PipeWire file descriptor from portal
                     let pw_fd = proxy.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
-                    println!("Obtained authenticated PipeWire remote FD: {}", pw_fd.as_raw_fd());
+                    tracing::info!("Obtained authenticated PipeWire remote FD: {}", pw_fd.as_raw_fd());
 
                     // Clear FD_CLOEXEC so child gst-launch-1.0 process inherits this file descriptor
                     unsafe {
@@ -184,7 +184,7 @@ pub async fn trigger_os_screencast_picker(state: Arc<StreamerState>) -> Result<S
                 }
             }
             Err(e) => {
-                println!("OS screencast picker cancelled: {}", e);
+                tracing::info!("OS screencast picker cancelled: {}", e);
                 return Err(format!("Picker cancelled: {}", e));
             }
         }
@@ -232,7 +232,7 @@ pub async fn run_streamer(state: Arc<StreamerState>, preferred_port: u16) {
     loop {
         if let Ok((socket, addr)) = listener.accept().await {
             let _ = socket.set_nodelay(true);
-            println!("Stream client connected from {}", addr);
+            tracing::info!("Stream client connected from {}", addr);
             let state_clone = state.clone();
             tokio::spawn(async move {
                 handle_stream_client(socket, state_clone).await;
@@ -245,14 +245,14 @@ async fn bind_stream_listener(preferred_port: u16) -> (TcpListener, u16) {
     for p in preferred_port..preferred_port.saturating_add(50) {
         let addr = std::net::SocketAddr::from(([0, 0, 0, 0], p));
         if let Ok(listener) = TcpListener::bind(addr).await {
-            println!("Screen Stream TCP server listening on {}", addr);
+            tracing::info!("Screen Stream TCP server listening on {}", addr);
             return (listener, p);
         }
     }
 
     let listener = TcpListener::bind("0.0.0.0:0").await.expect("Failed to bind any stream port");
     let actual_port = listener.local_addr().unwrap().port();
-    println!("Screen Stream TCP server fallback listening on 0.0.0.0:{}", actual_port);
+    tracing::info!("Screen Stream TCP server fallback listening on 0.0.0.0:{}", actual_port);
     (listener, actual_port)
 }
 

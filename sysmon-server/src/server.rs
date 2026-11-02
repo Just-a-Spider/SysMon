@@ -88,7 +88,7 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
     });
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    println!("TCP Server listening on {}", addr);
+    tracing::info!("TCP Server listening on {}", addr);
     let listener = TcpListener::bind(addr).await.unwrap();
 
     loop {
@@ -96,7 +96,7 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
             accept_res = listener.accept() => {
                 if let Ok((socket, peer_addr)) = accept_res {
                     let _ = socket.set_nodelay(true);
-                    println!("3DS TCP connection established from {}", peer_addr);
+                    tracing::info!("3DS TCP connection established from {}", peer_addr);
                     let srv = srv_state.clone();
                     tasks.spawn(async move {
                         handle_connection(socket, srv).await;
@@ -195,11 +195,11 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
     };
     
     if msg.pin.as_deref() != Some(&pin) {
-        eprintln!("[SysMon Server] Auth failed: received PIN {:?}, expected PIN {:?}", msg.pin, pin);
+        tracing::warn!("[SysMon Server] Auth failed: received PIN {:?}, expected PIN {:?}", msg.pin, pin);
         return; // Auth failed
     }
 
-    println!("[SysMon Server] Action received: '{}', btn: {:?}, pid: {:?}", msg.action, msg.btn, msg.pid);
+    tracing::info!("[SysMon Server] Action received: '{}', btn: {:?}, pid: {:?}", msg.action, msg.btn, msg.pid);
 
     match msg.action.as_str() {
         "button" => {
@@ -210,7 +210,7 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
                 };
                 
                 if let Some(mac) = macro_opt {
-                    println!("[SysMon Server] Triggering macro '{}' ({}): {:?}", mac.label, mac.kind, mac.value);
+                    tracing::info!("[SysMon Server] Triggering macro '{}' ({}): {:?}", mac.label, mac.kind, mac.value);
                     let mut rm = srv.running_macros.lock().await;
                     if rm.insert(btn.clone()) {
                         let rm_clone = srv.running_macros.clone();
@@ -222,19 +222,19 @@ async fn handle_message(srv: &ServerState, msg: ClientMessage) {
                         });
                     }
                 } else {
-                    println!("[SysMon Server] No macro found mapped to button '{}'", btn);
+                    tracing::warn!("[SysMon Server] No macro found mapped to button '{}'", btn);
                 }
             }
         },
         "media" => {
             if let Some(btn) = msg.btn {
-                println!("[SysMon Server] Dispatching media command: '{}'", btn);
+                tracing::info!("[SysMon Server] Dispatching media command: '{}'", btn);
                 crate::sys::media_command(&btn, Some(srv.enigo.clone())).await;
             }
         },
         "kill" => {
             if let Some(pid) = msg.pid {
-                println!("[SysMon Server] Killing process PID: {}", pid);
+                tracing::info!("[SysMon Server] Killing process PID: {}", pid);
                 kill_proc(pid);
             }
         },

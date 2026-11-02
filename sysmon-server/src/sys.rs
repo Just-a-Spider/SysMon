@@ -86,6 +86,8 @@ impl SysPoller {
             }
         }
 
+        crate::logging::log_system_diagnostics(&sys, &components);
+
         Self { 
             sys, 
             components, 

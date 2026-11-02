@@ -67,7 +67,7 @@ pub fn parse_controller_packet(buf: &[u8], expected_pin: u32) -> Option<Controll
         let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let prev = LAST_AUTH_WARN.swap(now_secs, Ordering::Relaxed);
         if now_secs.saturating_sub(prev) >= 2 {
-            eprintln!("[SysMon Controller] Auth failed: received PIN {}, expected PIN {}", packet_pin, expected_pin);
+            tracing::warn!("[SysMon Controller] Auth failed: received PIN {}, expected PIN {}", packet_pin, expected_pin);
         }
         return None;
     }
@@ -166,11 +166,11 @@ pub async fn run_controller_server(port: u16, pin: u32) {
     let addr = format!("0.0.0.0:{}", port);
     let socket = match UdpSocket::bind(&addr).await {
         Ok(s) => {
-            println!("UDP Controller server listening on {}", addr);
+            tracing::info!("UDP Controller server listening on {}", addr);
             Arc::new(s)
         }
         Err(e) => {
-            eprintln!("Failed to bind UDP Controller socket on {}: {}", addr, e);
+            tracing::error!("Failed to bind UDP Controller socket on {}: {}", addr, e);
             return;
         }
     };
@@ -178,12 +178,12 @@ pub async fn run_controller_server(port: u16, pin: u32) {
     #[cfg(target_os = "linux")]
     let device: Arc<Mutex<Option<VirtualDevice>>> = match create_virtual_gamepad() {
         Ok(dev) => {
-            println!("Initialized SysMon 3DS Virtual Controller on /dev/uinput");
+            tracing::info!("Initialized SysMon 3DS Virtual Controller on /dev/uinput");
             Arc::new(Mutex::new(Some(dev)))
         }
         Err(e) => {
-            eprintln!(
-                "Warning: Could not create /dev/uinput virtual gamepad: {}. (Will auto-retry on incoming packets once uinput is available)",
+            tracing::warn!(
+                "Could not create /dev/uinput virtual gamepad: {}. (Will auto-retry on incoming packets once uinput is available)",
                 e
             );
             Arc::new(Mutex::new(None))
@@ -193,12 +193,12 @@ pub async fn run_controller_server(port: u16, pin: u32) {
     #[cfg(target_os = "windows")]
     let device = match create_virtual_gamepad_windows() {
         Ok(dev) => {
-            println!("Initialized SysMon 3DS Virtual Xbox 360 Controller via ViGEmBus");
+            tracing::info!("Initialized SysMon 3DS Virtual Xbox 360 Controller via ViGEmBus");
             Some(Arc::new(Mutex::new(dev)))
         }
         Err(e) => {
-            eprintln!(
-                "Notice: Could not connect to ViGEmBus virtual gamepad driver: {}. Install ViGEmBus (https://github.com/ViGEm/ViGEmBus/releases) to enable virtual controller on Windows.",
+            tracing::warn!(
+                "Could not connect to ViGEmBus virtual gamepad driver: {}. Install ViGEmBus (https://github.com/ViGEm/ViGEmBus/releases) to enable virtual controller on Windows.",
                 e
             );
             None
@@ -271,7 +271,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                 let last_log = LAST_LOGGED_PEER.load(Ordering::Relaxed);
                 if now_secs.saturating_sub(last_log) >= 5 {
                     LAST_LOGGED_PEER.store(now_secs, Ordering::Relaxed);
-                    println!("Receiving 3DS UDP controller stream from {}", peer);
+                    tracing::info!("Receiving 3DS UDP controller stream from {}", peer);
                 }
 
                 let packet = match parse_controller_packet(&buf[..len], pin) {
@@ -298,7 +298,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                     if lock.is_none() {
                         match create_virtual_gamepad() {
                             Ok(new_dev) => {
-                                println!("Successfully initialized SysMon 3DS Virtual Controller on /dev/uinput");
+                                tracing::info!("Successfully initialized SysMon 3DS Virtual Controller on /dev/uinput");
                                 *lock = Some(new_dev);
                             }
                             Err(e) => {
@@ -307,7 +307,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                                 let last_e = LAST_DEV_ERR.load(Ordering::Relaxed);
                                 if now_secs.saturating_sub(last_e) >= 5 {
                                     LAST_DEV_ERR.store(now_secs, Ordering::Relaxed);
-                                    eprintln!("Warning: Failed to create /dev/uinput virtual gamepad: {}", e);
+                                    tracing::warn!("Failed to create /dev/uinput virtual gamepad: {}", e);
                                 }
                             }
                         }
@@ -346,7 +346,7 @@ pub async fn run_controller_server(port: u16, pin: u32) {
                 }
             }
             Err(e) => {
-                eprintln!("UDP controller recv error: {}", e);
+                tracing::error!("UDP controller recv error: {}", e);
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }

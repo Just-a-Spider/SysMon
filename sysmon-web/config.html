@@ -166,7 +166,7 @@
                 <div class="form-group">
                     <label>Screen Sharing Controls (OS Dialog & Sources)</label>
                     <div style="display: flex; gap: 10px; margin-bottom: 8px;">
-                        <button type="button" onclick="triggerOsPicker()" style="background-color: var(--cyan-color); color: #000; font-weight: bold; flex: 1;">🖥️ Choose Screen / Window (OS Dialog)</button>
+                        <button type="button" onclick="triggerOsPicker()" style="background-color: var(--cyan-color); color: #000; font-weight: bold; flex: 1;">Choose Screen / Window (OS Dialog)</button>
                         <button type="button" onclick="toggleStreamSharing()" id="btn-toggle-stream" style="background-color: var(--accent-color); flex: 1;">Toggle Sharing</button>
                     </div>
                     <div style="background-color: #1a1a1a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); font-size: 0.9em; margin-bottom: 8px;">
@@ -215,6 +215,21 @@
             </div>
             
             <button onclick="saveMacros()" style="margin-top: 15px;">Save Macros</button>
+        </div>
+
+        <div class="panel">
+            <h2>System Diagnostics & Logs</h2>
+            <p style="color: #bbb; font-size: 0.9em; margin-bottom: 12px;">
+                Recorded in <code>sysmon.log</code> for diagnosing hardware sensors, GPU telemetry and 3DS connections.
+            </p>
+            <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <button type="button" onclick="fetchLogs()" style="background-color: var(--cyan-color); color: #000; font-weight: bold; flex: 1;">Refresh Logs</button>
+                <a href="/api/logs" download="sysmon.log" style="text-decoration: none; flex: 1;">
+                    <button type="button" style="background-color: var(--accent-color); width: 100%;">Download sysmon.log</button>
+                </a>
+                <button type="button" onclick="copyLogs()" style="background-color: #333; color: #fff; flex: 1;">Copy Logs</button>
+            </div>
+            <pre id="log-viewer" style="background-color: #121212; border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; font-family: monospace; font-size: 0.85em; max-height: 240px; overflow-y: auto; white-space: pre-wrap; color: #e0e0e0;">Click 'Refresh Logs' to load server diagnostics...</pre>
         </div>
     </div>
 
@@ -404,7 +419,34 @@
             } catch (e) {}
         }, 1500);
 
-        window.onload = loadData;
+        async function fetchLogs() {
+            const viewer = document.getElementById('log-viewer');
+            try {
+                const res = await fetch('/api/logs');
+                if (res.ok) {
+                    const text = await res.text();
+                    viewer.textContent = text || 'Log file is currently empty.';
+                    viewer.scrollTop = viewer.scrollHeight;
+                } else {
+                    viewer.textContent = 'Error loading logs: ' + res.statusText;
+                }
+            } catch (e) {
+                viewer.textContent = 'Failed to fetch logs: ' + e;
+            }
+        }
+
+        async function copyLogs() {
+            const viewer = document.getElementById('log-viewer');
+            if (navigator.clipboard) {
+                await navigator.clipboard.writeText(viewer.textContent);
+                alert('Logs copied to clipboard.');
+            }
+        }
+
+        window.onload = () => {
+            loadData();
+            fetchLogs();
+        };
     </script>
 </body>
 </html>
