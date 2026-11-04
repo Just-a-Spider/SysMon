@@ -16,6 +16,7 @@ pub fn get_wmi_cpu_temp() -> Option<f32> {
 #[cfg(target_os = "windows")]
 mod imp {
     use std::cell::RefCell;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_DESC1};
@@ -148,6 +149,8 @@ mod imp {
                 let mut returned = 0u32;
                 let mut best_score = -1;
                 let mut best_cpu_temp: Option<f32> = None;
+                let mut best_id = String::new();
+                let mut best_name = String::new();
 
                 let id_prop = windows::core::w!("Identifier");
                 let name_prop = windows::core::w!("Name");
@@ -225,9 +228,14 @@ mod imp {
                                         if score > best_score {
                                             best_score = score;
                                             best_cpu_temp = Some(temp);
+                                            best_id = id_str.clone();
+                                            best_name = name_str.clone();
                                         } else if score == best_score && score > 0 {
-                                            // Take the maximum among equal top-scoring sensors
-                                            best_cpu_temp = Some(best_cpu_temp.unwrap_or(0.0).max(temp));
+                                            if temp > best_cpu_temp.unwrap_or(0.0) {
+                                                best_cpu_temp = Some(temp);
+                                                best_id = id_str.clone();
+                                                best_name = name_str.clone();
+                                            }
                                         }
                                     }
                                 }
@@ -238,6 +246,20 @@ mod imp {
                         let _ = VariantClear(&mut var_name);
                         let _ = VariantClear(&mut var_val);
                     }
+                }
+
+                static SENSOR_PICKED_LOGGED: AtomicBool = AtomicBool::new(false);
+                static NONE_MATCHED_LOGGED: AtomicBool = AtomicBool::new(false);
+
+                if let Some(temp) = best_cpu_temp {
+                    if !SENSOR_PICKED_LOGGED.swap(true, Ordering::Relaxed) {
+                        tracing::info!(
+                            "WMI Hardware Monitor bridge selected CPU sensor: id='{}', name='{}', value={:.1} C",
+                            best_id, best_name, temp
+                        );
+                    }
+                } else if !NONE_MATCHED_LOGGED.swap(true, Ordering::Relaxed) {
+                    tracing::info!("WMI Hardware Monitor query succeeded, but no matching CPU sensor found (/amdcpu/ or /intelcpu/)");
                 }
 
                 best_cpu_temp
