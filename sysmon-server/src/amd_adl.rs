@@ -79,11 +79,11 @@ mod imp {
             Ok(l) => l,
             Err(_) => return std::ptr::null_mut(),
         };
-        std::alloc::alloc_zeroed(layout) as *mut c_void
+        unsafe { std::alloc::alloc_zeroed(layout) as *mut c_void }
     }
 
     struct AdlState {
-        context_handle: Option<ADLContextHandle>,
+        context_handle_addr: Option<usize>,
         active_adapter_index: i32,
         adapter_name: String,
         fn_temp6: Option<FnAdlOverdrive6TemperatureGet>,
@@ -122,13 +122,13 @@ mod imp {
             let fn_fan6: Option<FnAdlOverdrive6FanSpeedGet> = get_sym(b"ADL_Overdrive6_FanSpeed_Get\0").map(|p| std::mem::transmute(p));
             let fn_fan5: Option<FnAdlOverdrive5FanSpeedGet> = get_sym(b"ADL_Overdrive5_FanSpeed_Get\0").map(|p| std::mem::transmute(p));
 
-            let mut context_handle = None;
+            let mut context_handle_addr = None;
             let mut init_success = false;
 
             if let Some(create2) = fn_adl2_create {
                 let mut ctx: ADLContextHandle = std::ptr::null_mut();
                 if create2(Some(adl_alloc), 1, &mut ctx) == ADL_OK && !ctx.is_null() {
-                    context_handle = Some(ctx);
+                    context_handle_addr = Some(ctx as usize);
                     init_success = true;
                 }
             }
@@ -194,7 +194,7 @@ mod imp {
             );
 
             Some(AdlState {
-                context_handle,
+                context_handle_addr,
                 active_adapter_index,
                 adapter_name: final_name,
                 fn_temp6,
@@ -231,8 +231,9 @@ mod imp {
 
             // 2. Try OverdriveN Temperature (RDNA / modern)
             if temp == 0.0 {
-                if let (Some(fn_n), Some(ctx)) = (state.fn_temp_n, state.context_handle) {
+                if let (Some(fn_n), Some(ctx_addr)) = (state.fn_temp_n, state.context_handle_addr) {
                     let mut milli = 0i32;
+                    let ctx = ctx_addr as ADLContextHandle;
                     // thermal_type: 1 = CORE, 2 = MEMORY
                     if fn_n(ctx, idx, 1, &mut milli) == ADL_OK && milli > 0 {
                         temp = milli as f32 / 1000.0;

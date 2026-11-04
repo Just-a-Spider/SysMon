@@ -16,7 +16,7 @@ pub fn get_wmi_cpu_temp() -> Option<f32> {
 #[cfg(target_os = "windows")]
 mod imp {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, DXGI_ADAPTER_DESC1};
 
     pub fn get_dxgi_gpu_name() -> Option<String> {
         unsafe {
@@ -27,9 +27,10 @@ mod imp {
 
             while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
                 adapter_idx += 1;
-                if let Ok(desc) = adapter.GetDesc1() {
+                let mut desc = DXGI_ADAPTER_DESC1::default();
+                if adapter.GetDesc1(&mut desc).is_ok() {
                     // Skip software renderers (DXGI_ADAPTER_FLAG_SOFTWARE = 2)
-                    if (desc.Flags & 2) != 0 {
+                    if (desc.Flags.0 & 2) != 0 {
                         continue;
                     }
 
@@ -63,11 +64,10 @@ mod imp {
             return None;
         }
 
-        use windows::core::{BSTR, HRESULT, PCWSTR};
+        use windows::core::{BSTR, PCWSTR};
         use windows::Win32::System::Com::{
             CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CLSCTX_INPROC_SERVER,
-            COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_AUTHN_WINNT,
-            RPC_C_AUTHZ_NONE, RPC_C_IMP_LEVEL_IMPERSONATE,
+            COINIT_MULTITHREADED,
         };
         use windows::Win32::System::Wmi::{
             IEnumWbemClassObject, IWbemLocator, IWbemServices, WbemLocator,
@@ -87,22 +87,22 @@ mod imp {
             };
 
             let namespaces = [
-                windows::core::w!(r"ROOT\LibreHardwareMonitor"),
-                windows::core::w!(r"ROOT\OpenHardwareMonitor"),
+                "ROOT\\LibreHardwareMonitor",
+                "ROOT\\OpenHardwareMonitor",
             ];
 
             let mut services: Option<IWbemServices> = None;
             for ns in namespaces {
-                if let Ok(svc) = locator.ConnectServer(&BSTR::from(PCWSTR(ns.as_ptr())), None, None, None, 0, None, None) {
+                if let Ok(svc) = locator.ConnectServer(&BSTR::from(ns), None, None, None, 0, None, None) {
                     let _ = CoSetProxyBlanket(
                         &svc,
-                        RPC_C_AUTHN_WINNT,
-                        RPC_C_AUTHZ_NONE,
+                        10, // RPC_C_AUTHN_WINNT
+                        0,  // RPC_C_AUTHZ_NONE
                         None,
-                        RPC_C_AUTHN_LEVEL_CALL,
-                        RPC_C_IMP_LEVEL_IMPERSONATE,
+                        3,  // RPC_C_AUTHN_LEVEL_CALL
+                        3,  // RPC_C_IMP_LEVEL_IMPERSONATE
                         None,
-                        EOAC_NONE,
+                        0,  // EOAC_NONE
                     );
                     services = Some(svc);
                     break;
@@ -118,12 +118,9 @@ mod imp {
                 }
             };
 
-            let query = windows::core::w!("SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature'");
-            let lang = windows::core::w!("WQL");
-
             let enumerator: IEnumWbemClassObject = match services.ExecQuery(
-                &BSTR::from(PCWSTR(lang.as_ptr())),
-                &BSTR::from(PCWSTR(query.as_ptr())),
+                &BSTR::from("WQL"),
+                &BSTR::from("SELECT Name, Value, SensorType FROM Sensor WHERE SensorType = 'Temperature'"),
                 WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
                 None,
             ) {
@@ -146,16 +143,13 @@ mod imp {
                     if obj.Get(PCWSTR(name_prop.as_ptr()), 0, &mut var_name, None, None).is_ok()
                         && obj.Get(PCWSTR(val_prop.as_ptr()), 0, &mut var_val, None, None).is_ok()
                     {
-                        let name_bstr = var_name.Anonymous.Anonymous.Anonymous.bstrVal;
-                        if !name_bstr.is_null() {
-                            let name_str = name_bstr.to_string().to_lowercase();
-                            if name_str.contains("cpu") || name_str.contains("package") || name_str.contains("core") || name_str.contains("tctl") {
-                                // VT_R4 is float (f32)
-                                let val = var_val.Anonymous.Anonymous.Anonymous.fltVal;
-                                if val > 0.0 && val < 120.0 {
-                                    cpu_temp = Some(val);
-                                    break;
-                                }
+                        let name_str = var_name.Anonymous.Anonymous.Anonymous.bstrVal.to_string().to_lowercase();
+                        if !name_str.is_empty() && (name_str.contains("cpu") || name_str.contains("package") || name_str.contains("core") || name_str.contains("tctl")) {
+                            // VT_R4 is float (f32)
+                            let val = var_val.Anonymous.Anonymous.Anonymous.fltVal;
+                            if val > 0.0 && val < 120.0 {
+                                cpu_temp = Some(val);
+                                break;
                             }
                         }
                     }
