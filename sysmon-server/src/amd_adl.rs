@@ -19,7 +19,6 @@ mod imp {
     use super::AmdGpuData;
     use std::ffi::{c_char, c_void};
     use std::sync::Mutex;
-    use windows::core::PCWSTR;
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
     const ADL_OK: i32 = 0;

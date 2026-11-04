@@ -154,18 +154,15 @@ mod imp {
                 let val_prop = windows::core::w!("Value");
 
                 loop {
-                    match enumerator.Next(0, &mut objects, &mut returned) {
-                        Ok(_) => {
-                            if returned == 0 {
-                                break;
-                            }
-                        }
-                        Err(_) => {
-                            // WMI connection lost or provider terminated
-                            state.services = None;
-                            state.last_attempt = Some(Instant::now());
-                            break;
-                        }
+                    let hr = enumerator.Next(0, &mut objects, &mut returned);
+                    if hr.is_err() {
+                        // WMI connection lost or provider terminated
+                        state.services = None;
+                        state.last_attempt = Some(Instant::now());
+                        break;
+                    }
+                    if returned == 0 {
+                        break;
                     }
 
                     if let Some(ref obj) = objects[0] {
