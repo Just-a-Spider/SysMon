@@ -133,29 +133,43 @@ impl SysPoller {
             }
         }
 
+        #[cfg(target_os = "windows")]
+        if cpu_temp == 0.0 {
+            if let Some(wmi_temp) = crate::win_hw::get_wmi_cpu_temp() {
+                cpu_temp = wmi_temp;
+            }
+        }
+
+        let mut cpu_fan = 0;
+        let mut gpu_fan = 0;
+
         let (gpu_name, gpu_temp) = if let Some((name, temp)) = get_dedicated_gpu_data() {
             (name, temp)
+        } else if let Some(amd_data) = crate::amd_adl::get_amd_gpu_data() {
+            if amd_data.fan_rpm > 0 {
+                gpu_fan = amd_data.fan_rpm;
+            }
+            (amd_data.name, amd_data.temp)
         } else {
             let mut fallback_temp = 0.0;
-            let mut fallback_name = "GPU".to_string();
+            let mut fallback_name = crate::win_hw::get_dxgi_gpu_name().unwrap_or_else(|| "GPU".to_string());
             for component in self.components.list() {
                 let label = component.label().to_lowercase();
                 if label.contains("gpu") || label.contains("edge") || label.contains("junction") || label.contains("amdgpu") {
                     if fallback_temp == 0.0 {
                         fallback_temp = component.temperature().unwrap_or(0.0);
-                        if label.contains("amd") || label.contains("edge") {
-                            fallback_name = "Radeon".to_string();
-                        } else if label.contains("intel") {
-                            fallback_name = "Intel".to_string();
+                        if fallback_name == "GPU" {
+                            if label.contains("amd") || label.contains("edge") {
+                                fallback_name = "Radeon".to_string();
+                            } else if label.contains("intel") {
+                                fallback_name = "Intel".to_string();
+                            }
                         }
                     }
                 }
             }
             (fallback_name, fallback_temp)
         };
-
-        let mut cpu_fan = 0;
-        let mut gpu_fan = 0;
         
         #[cfg(target_os = "linux")]
         {

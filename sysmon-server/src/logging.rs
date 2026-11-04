@@ -93,14 +93,33 @@ fn log_gpu_probe() {
         }
     }
 
-    // Windows AMD ADL check
+    // Windows GPU and sensor diagnostics
     #[cfg(target_os = "windows")]
     {
-        let adl_path = std::path::Path::new(r"C:\Windows\System32\atiadlxx.dll");
-        if adl_path.exists() {
-            tracing::info!("AMD ADL library detected: C:\\Windows\\System32\\atiadlxx.dll");
+        if let Some(amd_data) = crate::amd_adl::get_amd_gpu_data() {
+            tracing::info!(
+                "AMD ADL query succeeded: model='{}', temp={:.1} C, fan={} RPM",
+                amd_data.name,
+                amd_data.temp,
+                amd_data.fan_rpm
+            );
         } else {
-            tracing::info!("AMD ADL library not found at C:\\Windows\\System32\\atiadlxx.dll");
+            let adl_path = std::path::Path::new(r"C:\Windows\System32\atiadlxx.dll");
+            if adl_path.exists() {
+                tracing::info!("AMD ADL library found at C:\\Windows\\System32\\atiadlxx.dll (no active AMD telemetry returned)");
+            } else {
+                tracing::info!("AMD ADL library not found at C:\\Windows\\System32\\atiadlxx.dll");
+            }
+        }
+
+        if let Some(dxgi_name) = crate::win_hw::get_dxgi_gpu_name() {
+            tracing::info!("DXGI Primary GPU Adapter: '{}'", dxgi_name);
+        }
+
+        if let Some(wmi_cpu) = crate::win_hw::get_wmi_cpu_temp() {
+            tracing::info!("WMI Hardware Monitor bridge detected: CPU temp = {:.1} C", wmi_cpu);
+        } else {
+            tracing::info!("WMI Hardware Monitor bridge (LibreHardwareMonitor) not detected");
         }
     }
 

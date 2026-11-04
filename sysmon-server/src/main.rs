@@ -4,6 +4,8 @@ mod sys;
 mod web_api;
 mod controller;
 mod logging;
+mod amd_adl;
+mod win_hw;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
