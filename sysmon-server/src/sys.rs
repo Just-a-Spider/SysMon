@@ -57,7 +57,9 @@ impl SysPoller {
         
         let components = Components::new_with_refreshed_list();
         
+        #[allow(unused_mut)]
         let mut cpu_fan_path = None;
+        #[allow(unused_mut)]
         let mut gpu_fan_path = None;
         
         #[cfg(target_os = "linux")]
@@ -140,6 +142,7 @@ impl SysPoller {
             }
         }
 
+        #[allow(unused_mut)]
         let mut cpu_fan = 0;
         let mut gpu_fan = 0;
 

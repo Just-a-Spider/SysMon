@@ -30,7 +30,7 @@ mod imp {
                 let mut desc = DXGI_ADAPTER_DESC1::default();
                 if adapter.GetDesc1(&mut desc).is_ok() {
                     // Skip software renderers (DXGI_ADAPTER_FLAG_SOFTWARE = 2)
-                    if (desc.Flags.0 & 2) != 0 {
+                    if (desc.Flags & 2) != 0 {
                         continue;
                     }
 
@@ -66,7 +66,7 @@ mod imp {
 
         use windows::core::{BSTR, PCWSTR};
         use windows::Win32::System::Com::{
-            CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CLSCTX_INPROC_SERVER,
+            CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER,
             COINIT_MULTITHREADED,
         };
         use windows::Win32::System::Wmi::{
@@ -94,16 +94,6 @@ mod imp {
             let mut services: Option<IWbemServices> = None;
             for ns in namespaces {
                 if let Ok(svc) = locator.ConnectServer(&BSTR::from(ns), None, None, None, 0, None, None) {
-                    let _ = CoSetProxyBlanket(
-                        &svc,
-                        10, // RPC_C_AUTHN_WINNT
-                        0,  // RPC_C_AUTHZ_NONE
-                        None,
-                        3,  // RPC_C_AUTHN_LEVEL_CALL
-                        3,  // RPC_C_IMP_LEVEL_IMPERSONATE
-                        None,
-                        0,  // EOAC_NONE
-                    );
                     services = Some(svc);
                     break;
                 }
