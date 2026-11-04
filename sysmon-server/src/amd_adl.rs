@@ -59,6 +59,28 @@ mod imp {
         pub flags: i32,
     }
 
+    #[repr(C)]
+    pub struct ADLOD6FanSpeedInfo {
+        pub speed_type: i32,
+        pub fan_speed_percent: i32,
+        pub fan_speed_rpm: i32,
+        pub ext_value: i32,
+        pub ext_mask: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    pub struct ADLSingleSensorData {
+        pub supported: i32,
+        pub value: i32,
+    }
+
+    #[repr(C)]
+    pub struct ADLPMLogDataOutput {
+        pub size: i32,
+        pub sensors: [ADLSingleSensorData; 256],
+    }
+
     type ADLContextHandle = *mut c_void;
     type FnAdlMainMemoryAlloc = unsafe extern "system" fn(i32) -> *mut c_void;
     type FnAdlMainControlCreate = unsafe extern "system" fn(Option<FnAdlMainMemoryAlloc>, i32) -> i32;
@@ -68,7 +90,8 @@ mod imp {
     type FnAdlOverdrive6TemperatureGet = unsafe extern "system" fn(i32, *mut i32) -> i32;
     type FnAdlOverdrive5TemperatureGet = unsafe extern "system" fn(i32, i32, *mut ADLTemperature) -> i32;
     type FnAdl2OverdriveNTemperatureGet = unsafe extern "system" fn(ADLContextHandle, i32, i32, *mut i32) -> i32;
-    type FnAdlOverdrive6FanSpeedGet = unsafe extern "system" fn(i32, *mut ADLFanSpeedValue) -> i32;
+    type FnAdl2NewQueryPMLogDataGet = unsafe extern "system" fn(ADLContextHandle, i32, *mut ADLPMLogDataOutput) -> i32;
+    type FnAdlOverdrive6FanSpeedGet = unsafe extern "system" fn(i32, *mut ADLOD6FanSpeedInfo) -> i32;
     type FnAdlOverdrive5FanSpeedGet = unsafe extern "system" fn(i32, i32, *mut ADLFanSpeedValue) -> i32;
 
     unsafe extern "system" fn adl_alloc(size: i32) -> *mut c_void {
@@ -89,6 +112,7 @@ mod imp {
         fn_temp6: Option<FnAdlOverdrive6TemperatureGet>,
         fn_temp5: Option<FnAdlOverdrive5TemperatureGet>,
         fn_temp_n: Option<FnAdl2OverdriveNTemperatureGet>,
+        fn_pmlog: Option<FnAdl2NewQueryPMLogDataGet>,
         fn_fan6: Option<FnAdlOverdrive6FanSpeedGet>,
         fn_fan5: Option<FnAdlOverdrive5FanSpeedGet>,
     }
@@ -118,6 +142,7 @@ mod imp {
             let fn_temp6: Option<FnAdlOverdrive6TemperatureGet> = get_sym(b"ADL_Overdrive6_Temperature_Get\0").map(|p| std::mem::transmute(p));
             let fn_temp5: Option<FnAdlOverdrive5TemperatureGet> = get_sym(b"ADL_Overdrive5_Temperature_Get\0").map(|p| std::mem::transmute(p));
             let fn_temp_n: Option<FnAdl2OverdriveNTemperatureGet> = get_sym(b"ADL2_OverdriveN_Temperature_Get\0").map(|p| std::mem::transmute(p));
+            let fn_pmlog: Option<FnAdl2NewQueryPMLogDataGet> = get_sym(b"ADL2_New_QueryPMLogData_Get\0").map(|p| std::mem::transmute(p));
 
             let fn_fan6: Option<FnAdlOverdrive6FanSpeedGet> = get_sym(b"ADL_Overdrive6_FanSpeed_Get\0").map(|p| std::mem::transmute(p));
             let fn_fan5: Option<FnAdlOverdrive5FanSpeedGet> = get_sym(b"ADL_Overdrive5_FanSpeed_Get\0").map(|p| std::mem::transmute(p));
@@ -200,6 +225,7 @@ mod imp {
                 fn_temp6,
                 fn_temp5,
                 fn_temp_n,
+                fn_pmlog,
                 fn_fan6,
                 fn_fan5,
             })
@@ -219,17 +245,38 @@ mod imp {
         let idx = state.active_adapter_index;
 
         let mut temp = 0.0f32;
+        let mut fan_rpm = 0i32;
 
         unsafe {
-            // 1. Try Overdrive6 Temperature
-            if let Some(f6) = state.fn_temp6 {
-                let mut milli = 0i32;
-                if f6(idx, &mut milli) == ADL_OK && milli > 0 {
-                    temp = milli as f32 / 1000.0;
+            // 0. Try PMLog (modern RDNA / RX 7000 / 6000 series)
+            if let (Some(f_pmlog), Some(ctx_addr)) = (state.fn_pmlog, state.context_handle_addr) {
+                let mut log_data: ADLPMLogDataOutput = std::mem::zeroed();
+                log_data.size = std::mem::size_of::<ADLPMLogDataOutput>() as i32;
+                let ctx = ctx_addr as ADLContextHandle;
+                if f_pmlog(ctx, idx, &mut log_data) == ADL_OK {
+                    // ADL_PMLOG_TEMPERATURE_EDGE = 8
+                    if log_data.sensors[8].supported != 0 && log_data.sensors[8].value > 0 {
+                        let val = log_data.sensors[8].value as f32;
+                        temp = if val > 1000.0 { val / 1000.0 } else { val };
+                    }
+                    // ADL_PMLOG_FAN_RPM = 14
+                    if log_data.sensors[14].supported != 0 && log_data.sensors[14].value > 0 {
+                        fan_rpm = log_data.sensors[14].value;
+                    }
                 }
             }
 
-            // 2. Try OverdriveN Temperature (RDNA / modern)
+            // 1. Try Overdrive6 Temperature
+            if temp == 0.0 {
+                if let Some(f6) = state.fn_temp6 {
+                    let mut milli = 0i32;
+                    if f6(idx, &mut milli) == ADL_OK && milli > 0 {
+                        temp = milli as f32 / 1000.0;
+                    }
+                }
+            }
+
+            // 2. Try OverdriveN Temperature
             if temp == 0.0 {
                 if let (Some(fn_n), Some(ctx_addr)) = (state.fn_temp_n, state.context_handle_addr) {
                     let mut milli = 0i32;
@@ -255,28 +302,29 @@ mod imp {
             }
         }
 
-        let mut fan_rpm = 0i32;
-
         unsafe {
             // 1. Try Overdrive6 Fan Speed (RPM)
-            if let Some(f6) = state.fn_fan6 {
-                let mut val = ADLFanSpeedValue {
-                    size: std::mem::size_of::<ADLFanSpeedValue>() as i32,
-                    speed_type: 1, // RPM
-                    fan_speed: 0,
-                    flags: 0,
-                };
-                if f6(idx, &mut val) == ADL_OK && val.fan_speed > 0 {
-                    fan_rpm = val.fan_speed;
+            if fan_rpm == 0 {
+                if let Some(f6) = state.fn_fan6 {
+                    let mut info = ADLOD6FanSpeedInfo {
+                        speed_type: 0,
+                        fan_speed_percent: 0,
+                        fan_speed_rpm: 0,
+                        ext_value: 0,
+                        ext_mask: 0,
+                    };
+                    if f6(idx, &mut info) == ADL_OK && info.fan_speed_rpm > 0 && (info.speed_type & 0x2 != 0 || info.speed_type == 0) {
+                        fan_rpm = info.fan_speed_rpm;
+                    }
                 }
             }
 
-            // 2. Try Overdrive5 Fan Speed
+            // 2. Try Overdrive5 Fan Speed (speed_type 2 = RPM)
             if fan_rpm == 0 {
                 if let Some(f5) = state.fn_fan5 {
                     let mut val = ADLFanSpeedValue {
                         size: std::mem::size_of::<ADLFanSpeedValue>() as i32,
-                        speed_type: 1, // RPM
+                        speed_type: 2, // ADL_DL_FANCTRL_SPEED_TYPE_RPM = 2
                         fan_speed: 0,
                         flags: 0,
                     };

@@ -137,8 +137,26 @@ impl SysPoller {
 
         #[cfg(target_os = "windows")]
         if cpu_temp == 0.0 {
+            // 1. Try LibreHardwareMonitor / OpenHardwareMonitor WMI bridge FIRST
             if let Some(wmi_temp) = crate::win_hw::get_wmi_cpu_temp() {
                 cpu_temp = wmi_temp;
+            }
+
+            // 2. Fall back to ACPI thermal zone only if WMI bridge returned nothing
+            if cpu_temp == 0.0 {
+                let mut best_tz = 0.0f32;
+                for component in self.components.list() {
+                    let label = component.label().to_lowercase();
+                    if label.contains("thermalzone") {
+                        let temp = component.temperature().unwrap_or(0.0);
+                        if temp > 0.0 && temp < 115.0 {
+                            best_tz = best_tz.max(temp);
+                        }
+                    }
+                }
+                if best_tz > 0.0 {
+                    cpu_temp = best_tz;
+                }
             }
         }
 
