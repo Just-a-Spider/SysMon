@@ -117,9 +117,9 @@ fn log_gpu_probe() {
         }
 
         if let Some(wmi_cpu) = crate::win_hw::get_wmi_cpu_temp() {
-            tracing::info!("WMI Hardware Monitor bridge detected: CPU temp = {:.1} C", wmi_cpu);
+            tracing::info!("WMI Hardware Monitor bridge active at startup: CPU temp = {:.1} C", wmi_cpu);
         } else {
-            tracing::info!("WMI Hardware Monitor bridge (LibreHardwareMonitor) not detected");
+            tracing::info!("WMI Hardware Monitor bridge not active at startup (will continuously retry in background)");
         }
     }
 

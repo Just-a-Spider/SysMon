@@ -118,10 +118,26 @@ mod imp {
                         "ROOT\\OpenHardwareMonitor",
                     ];
 
+                    let mut connected_ns = None;
                     for ns in namespaces {
                         if let Ok(svc) = locator.ConnectServer(&BSTR::from(ns), None, None, None, 0, None, None) {
+                            connected_ns = Some(ns);
                             state.services = Some(svc);
                             break;
+                        }
+                    }
+
+                    static CONNECT_FAIL_LOGGED: AtomicBool = AtomicBool::new(false);
+                    static CONNECT_SUCCESS_LOGGED: AtomicBool = AtomicBool::new(false);
+
+                    if state.services.is_none() {
+                        if !CONNECT_FAIL_LOGGED.swap(true, Ordering::Relaxed) {
+                            tracing::info!("WMI Hardware Monitor connect failed: neither ROOT\\LibreHardwareMonitor nor ROOT\\OpenHardwareMonitor is currently available");
+                        }
+                        return None;
+                    } else if let Some(ns) = connected_ns {
+                        if !CONNECT_SUCCESS_LOGGED.swap(true, Ordering::Relaxed) {
+                            tracing::info!("WMI Hardware Monitor connected to namespace '{}'", ns);
                         }
                     }
                 }
@@ -156,6 +172,7 @@ mod imp {
                 let name_prop = windows::core::w!("Name");
                 let val_prop = windows::core::w!("Value");
 
+                let mut total_sensors_seen = 0;
                 loop {
                     let hr = enumerator.Next(0, &mut objects, &mut returned);
                     if hr.is_err() {
@@ -167,6 +184,7 @@ mod imp {
                     if returned == 0 {
                         break;
                     }
+                    total_sensors_seen += 1;
 
                     if let Some(ref obj) = objects[0] {
                         let mut var_id = VARIANT::default();
@@ -250,6 +268,7 @@ mod imp {
 
                 static SENSOR_PICKED_LOGGED: AtomicBool = AtomicBool::new(false);
                 static NONE_MATCHED_LOGGED: AtomicBool = AtomicBool::new(false);
+                static ZERO_SENSORS_LOGGED: AtomicBool = AtomicBool::new(false);
 
                 if let Some(temp) = best_cpu_temp {
                     if !SENSOR_PICKED_LOGGED.swap(true, Ordering::Relaxed) {
@@ -258,8 +277,15 @@ mod imp {
                             best_id, best_name, temp
                         );
                     }
+                } else if total_sensors_seen == 0 {
+                    if !ZERO_SENSORS_LOGGED.swap(true, Ordering::Relaxed) {
+                        tracing::info!("WMI Hardware Monitor query succeeded, but returned 0 temperature sensors");
+                    }
                 } else if !NONE_MATCHED_LOGGED.swap(true, Ordering::Relaxed) {
-                    tracing::info!("WMI Hardware Monitor query succeeded, but no matching CPU sensor found (/amdcpu/ or /intelcpu/)");
+                    tracing::info!(
+                        "WMI Hardware Monitor found {} temperature sensor(s), but none matched CPU criteria (/amdcpu/ or /intelcpu/)",
+                        total_sensors_seen
+                    );
                 }
 
                 best_cpu_temp

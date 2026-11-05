@@ -85,7 +85,9 @@ mod imp {
     type FnAdlMainControlCreate = unsafe extern "system" fn(Option<FnAdlMainMemoryAlloc>, i32) -> i32;
     type FnAdl2MainControlCreate = unsafe extern "system" fn(Option<FnAdlMainMemoryAlloc>, i32, *mut ADLContextHandle) -> i32;
     type FnAdlAdapterNumberOfAdaptersGet = unsafe extern "system" fn(*mut i32) -> i32;
+    type FnAdl2AdapterNumberOfAdaptersGet = unsafe extern "system" fn(ADLContextHandle, *mut i32) -> i32;
     type FnAdlAdapterAdapterInfoGet = unsafe extern "system" fn(*mut AdapterInfo, i32) -> i32;
+    type FnAdl2AdapterAdapterInfoGet = unsafe extern "system" fn(ADLContextHandle, *mut AdapterInfo, i32) -> i32;
     type FnAdlOverdrive6TemperatureGet = unsafe extern "system" fn(i32, *mut i32) -> i32;
     type FnAdlOverdrive5TemperatureGet = unsafe extern "system" fn(i32, i32, *mut ADLTemperature) -> i32;
     type FnAdl2OverdriveNTemperatureGet = unsafe extern "system" fn(ADLContextHandle, i32, i32, *mut i32) -> i32;
@@ -135,8 +137,10 @@ mod imp {
 
             let fn_adl2_create: Option<FnAdl2MainControlCreate> = get_sym(b"ADL2_Main_Control_Create\0").map(|p| std::mem::transmute(p));
             let fn_adl1_create: Option<FnAdlMainControlCreate> = get_sym(b"ADL_Main_Control_Create\0").map(|p| std::mem::transmute(p));
-            let fn_num_adapters: FnAdlAdapterNumberOfAdaptersGet = std::mem::transmute(get_sym(b"ADL_Adapter_NumberOfAdapters_Get\0")?);
-            let fn_adapter_info: FnAdlAdapterAdapterInfoGet = std::mem::transmute(get_sym(b"ADL_Adapter_AdapterInfo_Get\0")?);
+            let fn_adl2_num_adapters: Option<FnAdl2AdapterNumberOfAdaptersGet> = get_sym(b"ADL2_Adapter_NumberOfAdapters_Get\0").map(|p| std::mem::transmute(p));
+            let fn_adl2_adapter_info: Option<FnAdl2AdapterAdapterInfoGet> = get_sym(b"ADL2_Adapter_AdapterInfo_Get\0").map(|p| std::mem::transmute(p));
+            let fn_num_adapters: Option<FnAdlAdapterNumberOfAdaptersGet> = get_sym(b"ADL_Adapter_NumberOfAdapters_Get\0").map(|p| std::mem::transmute(p));
+            let fn_adapter_info: Option<FnAdlAdapterAdapterInfoGet> = get_sym(b"ADL_Adapter_AdapterInfo_Get\0").map(|p| std::mem::transmute(p));
 
             let fn_temp6: Option<FnAdlOverdrive6TemperatureGet> = get_sym(b"ADL_Overdrive6_Temperature_Get\0").map(|p| std::mem::transmute(p));
             let fn_temp5: Option<FnAdlOverdrive5TemperatureGet> = get_sym(b"ADL_Overdrive5_Temperature_Get\0").map(|p| std::mem::transmute(p));
@@ -157,11 +161,10 @@ mod imp {
                 }
             }
 
-            if !init_success {
-                if let Some(create1) = fn_adl1_create {
-                    if create1(Some(adl_alloc), 1) == ADL_OK {
-                        init_success = true;
-                    }
+            // Always initialize ADL1 too: ADL1 adapter enumeration and Overdrive calls depend on it
+            if let Some(create1) = fn_adl1_create {
+                if create1(Some(adl_alloc), 1) == ADL_OK {
+                    init_success = true;
                 }
             }
 
@@ -171,8 +174,23 @@ mod imp {
             }
 
             let mut num_adapters = 0;
-            if fn_num_adapters(&mut num_adapters) != ADL_OK || num_adapters <= 0 {
-                tracing::warn!("ADL_Adapter_NumberOfAdapters_Get returned no adapters");
+            let mut num_ok = false;
+            if let (Some(fn_n2), Some(ctx_addr)) = (fn_adl2_num_adapters, context_handle_addr) {
+                let ctx = ctx_addr as ADLContextHandle;
+                if fn_n2(ctx, &mut num_adapters) == ADL_OK && num_adapters > 0 {
+                    num_ok = true;
+                }
+            }
+            if !num_ok {
+                if let Some(fn_n1) = fn_num_adapters {
+                    if fn_n1(&mut num_adapters) == ADL_OK && num_adapters > 0 {
+                        num_ok = true;
+                    }
+                }
+            }
+
+            if !num_ok || num_adapters <= 0 {
+                tracing::warn!("ADL could not enumerate any display adapters");
                 return None;
             }
 
@@ -182,8 +200,23 @@ mod imp {
             }
 
             let total_size = (num_adapters as usize * std::mem::size_of::<AdapterInfo>()) as i32;
-            if fn_adapter_info(adapters.as_mut_ptr(), total_size) != ADL_OK {
-                tracing::warn!("ADL_Adapter_AdapterInfo_Get failed");
+            let mut info_ok = false;
+            if let (Some(fn_info2), Some(ctx_addr)) = (fn_adl2_adapter_info, context_handle_addr) {
+                let ctx = ctx_addr as ADLContextHandle;
+                if fn_info2(ctx, adapters.as_mut_ptr(), total_size) == ADL_OK {
+                    info_ok = true;
+                }
+            }
+            if !info_ok {
+                if let Some(fn_info1) = fn_adapter_info {
+                    if fn_info1(adapters.as_mut_ptr(), total_size) == ADL_OK {
+                        info_ok = true;
+                    }
+                }
+            }
+
+            if !info_ok {
+                tracing::warn!("ADL adapter info query failed");
                 return None;
             }
 
@@ -332,6 +365,14 @@ mod imp {
                     }
                 }
             }
+        }
+
+        static TELEMETRY_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if (temp > 0.0 || fan_rpm > 0) && !TELEMETRY_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            tracing::info!(
+                "AMD ADL telemetry active for '{}': temp={:.1} C, fan={} RPM",
+                state.adapter_name, temp, fan_rpm
+            );
         }
 
         Some(AmdGpuData {
