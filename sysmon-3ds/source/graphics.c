@@ -662,13 +662,24 @@ void graphics_draw_frame(int set_sub, int set_row, int preview_idx,
     snprintf(textStr, sizeof(textStr), "%.1f%%", g_cpu_usage);
     graphics_draw_dynamic_text(&textObj, textStr, 24, 38, 0.6f, clrText);
     graphics_draw_segmented_bar(24, 60, 155, 8, g_cpu_usage / 100.0f, clrAmber, 20);
-    snprintf(textStr, sizeof(textStr), "%.1fC  FAN %d", g_cpu_temp, g_cpu_fan);
-    graphics_draw_dynamic_text(&textObj, textStr, 24, 75, 0.42f, clrTextDim);
-    graphics_draw_segmented_bar(24, 88, 155, 6, g_cpu_temp / 100.0f, get_temp_color(g_cpu_temp), 20);
 
-    snprintf(textStr, sizeof(textStr), "%.1fC  FAN %d", g_gpu_temp, g_gpu_fan);
+    if (g_cpu_temp > 0.0f)
+        snprintf(textStr, sizeof(textStr), "%.1fC  FAN %d", g_cpu_temp, g_cpu_fan);
+    else if (g_cpu_fan > 0)
+        snprintf(textStr, sizeof(textStr), "N/A  FAN %d", g_cpu_fan);
+    else
+        snprintf(textStr, sizeof(textStr), "N/A");
+    graphics_draw_dynamic_text(&textObj, textStr, 24, 75, 0.42f, clrTextDim);
+    graphics_draw_segmented_bar(24, 88, 155, 6, g_cpu_temp > 0.0f ? (g_cpu_temp / 100.0f) : 0.0f, get_temp_color(g_cpu_temp), 20);
+
+    if (g_gpu_temp > 0.0f)
+        snprintf(textStr, sizeof(textStr), "%.1fC  FAN %d", g_gpu_temp, g_gpu_fan);
+    else if (g_gpu_fan > 0)
+        snprintf(textStr, sizeof(textStr), "N/A  FAN %d", g_gpu_fan);
+    else
+        snprintf(textStr, sizeof(textStr), "N/A");
     graphics_draw_dynamic_text(&textObj, textStr, 219, 38, 0.45f, clrText);
-    graphics_draw_segmented_bar(219, 58, 155, 8, g_gpu_temp / 100.0f, get_temp_color(g_gpu_temp), 20);
+    graphics_draw_segmented_bar(219, 58, 155, 8, g_gpu_temp > 0.0f ? (g_gpu_temp / 100.0f) : 0.0f, get_temp_color(g_gpu_temp), 20);
     snprintf(textStr, sizeof(textStr), "FREE RAM  %.2f GB", g_free_ram);
     graphics_draw_dynamic_text(&textObj, textStr, 219, 75, 0.42f, clrTextDim);
 
@@ -677,22 +688,35 @@ void graphics_draw_frame(int set_sub, int set_row, int preview_idx,
         float lo = 1000.0f, hi = -1000.0f;
         for (int i = 0; i < g_history_count; i++)
         {
-            if (g_temp_history[i]     < lo) lo = g_temp_history[i];
-            if (g_temp_history[i]     > hi) hi = g_temp_history[i];
-            if (g_gpu_temp_history[i] < lo) lo = g_gpu_temp_history[i];
-            if (g_gpu_temp_history[i] > hi) hi = g_gpu_temp_history[i];
+            if (g_temp_history[i] > 0.0f)
+            {
+                if (g_temp_history[i] < lo) lo = g_temp_history[i];
+                if (g_temp_history[i] > hi) hi = g_temp_history[i];
+            }
+            if (g_gpu_temp_history[i] > 0.0f)
+            {
+                if (g_gpu_temp_history[i] < lo) lo = g_gpu_temp_history[i];
+                if (g_gpu_temp_history[i] > hi) hi = g_gpu_temp_history[i];
+            }
         }
+        if (lo > hi) { lo = 30.0f; hi = 60.0f; }
         float span = (hi - lo < 5.0f) ? 5.0f : (hi - lo);
         float sx = 24, sy = 185, gh = 45.0f, dx = 230.0f / 9.0f;
         for (int i = 0; i < g_history_count - 1; i++)
         {
             float x1=sx+i*dx, x2=sx+(i+1)*dx;
-            float y1=sy-((g_temp_history[i]    -lo)/span*gh);
-            float y2=sy-((g_temp_history[i+1]  -lo)/span*gh);
-            float gy1=sy-((g_gpu_temp_history[i]  -lo)/span*gh);
-            float gy2=sy-((g_gpu_temp_history[i+1]-lo)/span*gh);
-            C2D_DrawLine(x1,y1,clrAmber,x2,y2,clrAmber,2.0f,0);
-            C2D_DrawLine(x1,gy1,clrCyan, x2,gy2,clrCyan, 2.0f,0);
+            if (g_temp_history[i] > 0.0f && g_temp_history[i+1] > 0.0f)
+            {
+                float y1=sy-((g_temp_history[i]    -lo)/span*gh);
+                float y2=sy-((g_temp_history[i+1]  -lo)/span*gh);
+                C2D_DrawLine(x1,y1,clrAmber,x2,y2,clrAmber,2.0f,0);
+            }
+            if (g_gpu_temp_history[i] > 0.0f && g_gpu_temp_history[i+1] > 0.0f)
+            {
+                float gy1=sy-((g_gpu_temp_history[i]  -lo)/span*gh);
+                float gy2=sy-((g_gpu_temp_history[i+1]-lo)/span*gh);
+                C2D_DrawLine(x1,gy1,clrCyan, x2,gy2,clrCyan, 2.0f,0);
+            }
         }
     }
 

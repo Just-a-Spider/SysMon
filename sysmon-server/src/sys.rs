@@ -135,14 +135,30 @@ impl SysPoller {
             }
         }
 
+        let amd_data = crate::amd_adl::get_amd_gpu_data();
+
         #[cfg(target_os = "windows")]
         if cpu_temp == 0.0 {
-            // 1. Try LibreHardwareMonitor / OpenHardwareMonitor WMI bridge FIRST
-            if let Some(wmi_temp) = crate::win_hw::get_wmi_cpu_temp() {
-                cpu_temp = wmi_temp;
+            // 1. Try LibreHardwareMonitor Web Server bridge FIRST (http://127.0.0.1:<lhm_port>/data.json)
+            if let Some(lhm_temp) = crate::win_hw::get_lhm_http_cpu_temp() {
+                cpu_temp = lhm_temp;
             }
 
-            // 2. Fall back to ACPI thermal zone only if WMI bridge returned nothing
+            // 2. Try WMI bridge (LibreHardwareMonitor / OpenHardwareMonitor)
+            if cpu_temp == 0.0 {
+                if let Some(wmi_temp) = crate::win_hw::get_wmi_cpu_temp() {
+                    cpu_temp = wmi_temp;
+                }
+            }
+
+            // 3. Try AMD ADL PMLog sensor 32
+            if cpu_temp == 0.0 {
+                if let Some(amd_cpu) = amd_data.as_ref().and_then(|d| d.cpu_temp) {
+                    cpu_temp = amd_cpu;
+                }
+            }
+
+            // 4. Fall back to ACPI thermal zone only if all above returned nothing
             if cpu_temp == 0.0 {
                 let mut best_tz = 0.0f32;
                 for component in self.components.list() {
@@ -166,11 +182,11 @@ impl SysPoller {
 
         let (gpu_name, gpu_temp) = if let Some((name, temp)) = get_dedicated_gpu_data() {
             (name, temp)
-        } else if let Some(amd_data) = crate::amd_adl::get_amd_gpu_data() {
-            if amd_data.fan_rpm > 0 {
-                gpu_fan = amd_data.fan_rpm;
+        } else if let Some(ref amd) = amd_data {
+            if amd.fan_rpm > 0 {
+                gpu_fan = amd.fan_rpm;
             }
-            (amd_data.name, amd_data.temp)
+            (amd.name.clone(), amd.temp)
         } else {
             let mut fallback_temp = 0.0;
             let mut fallback_name = crate::win_hw::get_dxgi_gpu_name().unwrap_or_else(|| "GPU".to_string());

@@ -50,6 +50,70 @@ pub async fn run_server(state: Arc<Mutex<AppState>>, port: u16) {
         }
     });
 
+    // LibreHardwareMonitor Web Server bridge task
+    #[cfg(target_os = "windows")]
+    {
+        let lhm_state = state.clone();
+        tasks.spawn(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_millis(500))
+                .build()
+                .unwrap_or_default();
+
+            static LHM_CONNECTED_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            static LHM_NO_CPU_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            static LHM_UNREACHABLE_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+            loop {
+                let lhm_port = {
+                    let s = lhm_state.lock().await;
+                    if s.config.lhm_port == 0 { 8085 } else { s.config.lhm_port }
+                };
+                let url = format!("http://127.0.0.1:{}/data.json", lhm_port);
+                let retry_delay = match client.get(&url).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        let text = resp.text().await.unwrap_or_default();
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if let Some(temp) = crate::win_hw::parse_lhm_json(&json) {
+                                crate::win_hw::update_lhm_http_cpu_temp(Some(temp));
+                                if !LHM_CONNECTED_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                    tracing::info!(
+                                        "LibreHardwareMonitor Web Server bridge connected at {} (CPU temp: {:.1} C)",
+                                        url, temp
+                                    );
+                                }
+                                Duration::from_millis(1500)
+                            } else {
+                                crate::win_hw::update_lhm_http_cpu_temp(None);
+                                if !LHM_NO_CPU_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                    tracing::info!(
+                                        "LibreHardwareMonitor Web Server connected at {}, but no CPU temperature sensor matched in JSON",
+                                        url
+                                    );
+                                }
+                                Duration::from_secs(5)
+                            }
+                        } else {
+                            crate::win_hw::update_lhm_http_cpu_temp(None);
+                            Duration::from_secs(5)
+                        }
+                    }
+                    _ => {
+                        crate::win_hw::update_lhm_http_cpu_temp(None);
+                        if !LHM_UNREACHABLE_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                            tracing::info!(
+                                "LibreHardwareMonitor Web Server bridge unreachable at {} (is Options -> Remote Web Server -> Run active in LibreHardwareMonitor?)",
+                                url
+                            );
+                        }
+                        Duration::from_secs(10)
+                    }
+                };
+                tokio::time::sleep(retry_delay).await;
+            }
+        });
+    }
+
     let srv_state = ServerState {
         app_state: state,
         sys_poller,

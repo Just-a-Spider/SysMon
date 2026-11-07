@@ -3,6 +3,8 @@ pub struct AmdGpuData {
     pub name: String,
     pub temp: f32,
     pub fan_rpm: i32,
+    #[allow(dead_code)]
+    pub cpu_temp: Option<f32>,
 }
 
 #[cfg(target_os = "windows")]
@@ -278,6 +280,7 @@ mod imp {
 
         let mut temp = 0.0f32;
         let mut fan_rpm = 0i32;
+        let mut cpu_temp: Option<f32> = None;
 
         unsafe {
             // 0. Try PMLog (modern RDNA / RX 7000 / 6000 series)
@@ -294,6 +297,26 @@ mod imp {
                     // ADL_PMLOG_FAN_RPM = 14
                     if log_data.sensors[14].supported != 0 && log_data.sensors[14].value > 0 {
                         fan_rpm = log_data.sensors[14].value;
+                    }
+
+                    // Diagnostics probe: sensor[32] (CPU temp), [33] (CPU power), [34] (CPU clock)
+                    static PMLOG_CPU_LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                    if !PMLOG_CPU_LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        tracing::info!(
+                            "AMD ADL PMLog CPU probe: sensor[32] (temp) supported={}, val={}; sensor[33] (pwr) supported={}, val={}; sensor[34] (clk) supported={}, val={}",
+                            log_data.sensors[32].supported, log_data.sensors[32].value,
+                            log_data.sensors[33].supported, log_data.sensors[33].value,
+                            log_data.sensors[34].supported, log_data.sensors[34].value,
+                        );
+                    }
+
+                    // ADL_PMLOG_TEMPERATURE_CPU = 32
+                    if log_data.sensors[32].supported != 0 && log_data.sensors[32].value > 0 {
+                        let raw = log_data.sensors[32].value as f32;
+                        let cpu_t = if raw > 1000.0 { raw / 1000.0 } else { raw };
+                        if cpu_t > 0.0 && cpu_t <= 125.0 {
+                            cpu_temp = Some(cpu_t);
+                        }
                     }
                 }
             }
@@ -379,6 +402,7 @@ mod imp {
             name: state.adapter_name.clone(),
             temp,
             fan_rpm,
+            cpu_temp,
         })
     }
 }

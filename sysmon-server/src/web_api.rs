@@ -48,8 +48,11 @@ async fn get_config(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): St
     Ok(Json(s.config.clone()))
 }
 
-async fn update_config(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): State<Arc<Mutex<AppState>>>, Json(payload): Json<crate::AppConfig>) -> Result<Json<bool>, StatusCode> {
+async fn update_config(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): State<Arc<Mutex<AppState>>>, Json(mut payload): Json<crate::AppConfig>) -> Result<Json<bool>, StatusCode> {
     if !addr.ip().is_loopback() { return Err(StatusCode::FORBIDDEN); }
+    if payload.lhm_port == 0 {
+        payload.lhm_port = 8085;
+    }
     let mut s = state.lock().await;
     s.config = payload;
     s.should_restart_server = true;

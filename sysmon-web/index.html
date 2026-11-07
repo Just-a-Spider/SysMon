@@ -50,10 +50,10 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 1.2em; margin-top: 20px;">
                 <div>
                     <span style="color: #bbb;">CPU Usage:</span> <span id="tel-cpu">--</span>%<br>
-                    <span style="color: #bbb;">CPU Temp:</span> <span id="tel-cputemp">--</span>°C
+                    <span style="color: #bbb;">CPU Temp:</span> <span id="tel-cputemp">--</span>
                 </div>
                 <div>
-                    <span style="color: #bbb;">GPU Temp:</span> <span id="tel-gputemp">--</span>°C<br>
+                    <span style="color: #bbb;">GPU Temp:</span> <span id="tel-gputemp">--</span><br>
                     <span style="color: #bbb;">Free RAM:</span> <span id="tel-ram">--</span> GB
                 </div>
             </div>
@@ -72,8 +72,8 @@
                     const data = await res.json();
                     if (data) {
                         document.getElementById('tel-cpu').innerText = data.cpu_usage;
-                        document.getElementById('tel-cputemp').innerText = data.cpu_temp;
-                        document.getElementById('tel-gputemp').innerText = data.gpu_temp;
+                        document.getElementById('tel-cputemp').innerText = data.cpu_temp > 0 ? (data.cpu_temp + ' °C') : 'N/A';
+                        document.getElementById('tel-gputemp').innerText = data.gpu_temp > 0 ? (data.gpu_temp + ' °C') : 'N/A';
                         document.getElementById('tel-ram').innerText = data.free_ram.toFixed(1);
                         if (data.top_procs && data.top_procs.length > 0) {
                             document.getElementById('tel-proc').innerText = `${data.top_procs[0].name} (${data.top_procs[0].cpu_percent.toFixed(1)}%)`;

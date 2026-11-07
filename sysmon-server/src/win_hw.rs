@@ -1,3 +1,146 @@
+use std::sync::Mutex;
+
+#[allow(dead_code)]
+static LHM_HTTP_CPU_TEMP: Mutex<Option<f32>> = Mutex::new(None);
+
+#[allow(dead_code)]
+pub fn get_lhm_http_cpu_temp() -> Option<f32> {
+    LHM_HTTP_CPU_TEMP.lock().ok().and_then(|t| *t)
+}
+
+#[allow(dead_code)]
+pub fn update_lhm_http_cpu_temp(temp: Option<f32>) {
+    if let Ok(mut lock) = LHM_HTTP_CPU_TEMP.lock() {
+        *lock = temp;
+    }
+}
+
+#[allow(dead_code)]
+pub fn parse_lhm_json(root: &serde_json::Value) -> Option<f32> {
+    fn parse_val(s: &str) -> Option<f32> {
+        let clean: String = s
+            .chars()
+            .map(|c| if c == ',' { '.' } else { c })
+            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
+        clean.parse::<f32>().ok()
+    }
+
+    struct Candidate {
+        score: i32,
+        temp: f32,
+    }
+
+    fn collect_candidates(node: &serde_json::Value, in_cpu: bool, candidates: &mut Vec<Candidate>) {
+        let text = node.get("Text").and_then(|v| v.as_str()).unwrap_or("");
+        let tl = text.to_lowercase();
+        let img = node.get("ImageURL").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+
+        // Computer container node should not be treated as a CPU hardware device
+        let is_computer = img.ends_with("computer.png") || tl == "sensor";
+
+        // Strong CPU markers (Ryzen, Core, legacy families, and APUs)
+        let has_strong_cpu_marker = !is_computer && (
+            tl.contains("cpu")
+                || tl.contains("ryzen")
+                || tl.contains("threadripper")
+                || tl.contains("epyc")
+                || tl.contains("xeon")
+                || tl.contains("core i")
+                || tl.contains("core ultra")
+                || tl.contains("core 2")
+                || tl.contains("core(tm)")
+                || tl.contains("pentium")
+                || tl.contains("celeron")
+                || tl.contains("atom")
+                || tl.contains("athlon")
+                || tl.contains("sempron")
+                || tl.contains("opteron")
+                || tl.contains("compute cores")
+                || tl.contains("processor")
+                || img.ends_with("cpu.png")
+        );
+
+        // GPU markers (vetos CPU branch even if in_cpu is true)
+        let is_gpu = tl.contains("gpu")
+            || tl.contains("intel arc")
+            || tl.contains("geforce")
+            || tl.contains("rtx")
+            || tl.contains("gtx")
+            || img.ends_with("gpu.png")
+            || img.ends_with("ati.png")
+            || img.ends_with("nvidia.png")
+            || ((tl.contains("radeon") || tl.contains("graphics")) && !has_strong_cpu_marker);
+
+        let cpu_branch = if is_gpu {
+            false
+        } else if has_strong_cpu_marker {
+            true
+        } else {
+            in_cpu
+        };
+
+        if cpu_branch {
+            let is_distance = tl.contains("distance") || tl.contains("tjmax");
+            let is_ccd = tl.contains("ccd");
+
+            if !is_distance && !is_ccd {
+                if let Some(val_str) = node.get("Value").and_then(|v| v.as_str()) {
+                    let vl = val_str.to_lowercase();
+                    let is_celsius = vl.contains("°c") || vl.contains("° c") || vl.ends_with(" c");
+                    let is_fahrenheit = vl.contains("°f") || vl.contains("° f") || vl.ends_with(" f");
+
+                    if is_celsius || is_fahrenheit {
+                        if let Some(raw) = parse_val(val_str) {
+                            let temp = if is_fahrenheit {
+                                (raw - 32.0) * 5.0 / 9.0
+                            } else {
+                                raw
+                            };
+                            if temp > 0.0 && temp <= 125.0 {
+                                // Priority score matching WMI:
+                                // 4: Tctl (AMD preferred package control)
+                                // 3: CPU Package (Intel / generic package)
+                                // 2: Tdie
+                                // 1: Core temp / Core #1 / Core Average
+                                // 0: other CPU sensor
+                                let score = if tl.contains("tctl") {
+                                    4
+                                } else if tl.contains("package") {
+                                    3
+                                } else if tl.contains("tdie") {
+                                    2
+                                } else if tl.contains("core") {
+                                    1
+                                } else {
+                                    0
+                                };
+                                candidates.push(Candidate { score, temp });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(children) = node.get("Children").and_then(|c| c.as_array()) {
+            for child in children {
+                collect_candidates(child, cpu_branch, candidates);
+            }
+        }
+    }
+
+    let mut candidates = Vec::new();
+    collect_candidates(root, false, &mut candidates);
+
+    // Pick highest score, tiebreak with highest temperature
+    candidates.sort_by(|a, b| {
+        b.score.cmp(&a.score).then_with(|| b.temp.partial_cmp(&a.temp).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    candidates.first().map(|c| c.temp)
+}
+
 #[cfg(target_os = "windows")]
 pub use imp::*;
 
@@ -291,5 +434,261 @@ mod imp {
                 best_cpu_temp
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_lhm_json_ryzen() {
+        let json = serde_json::json!({
+            "id": 0, "Text": "Sensor",
+            "Children": [
+                {
+                    "id": 1, "Text": "DESKTOP-ABC",
+                    "Children": [
+                        {
+                            "id": 2, "Text": "AMD Ryzen 7 8700F",
+                            "Children": [
+                                {
+                                    "id": 3, "Text": "Temperatures",
+                                    "Children": [
+                                        {"id": 4, "Text": "Core (Tctl/Tdie)", "Value": "47.5 °C"},
+                                        {"id": 5, "Text": "CPU CCD #1", "Value": "43.1 °C"}
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "id": 6, "Text": "AMD Radeon RX 7800 XT",
+                            "Children": [
+                                {
+                                    "id": 7, "Text": "Temperatures",
+                                    "Children": [
+                                        {"id": 8, "Text": "GPU Core", "Value": "42.0 °C"}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(parse_lhm_json(&json), Some(47.5));
+    }
+
+    #[test]
+    fn test_parse_lhm_json_fahrenheit() {
+        let json_tree = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "AMD Ryzen 7 7800X3D",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                // 119.3 °F = 48.5 °C
+                                {"Text": "Core (Tctl/Tdie)", "Value": "119.3 °F"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let temp = parse_lhm_json(&json_tree).unwrap();
+        assert!((temp - 48.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_parse_lhm_json_apu_ryzen_with_radeon_graphics() {
+        let json_tree = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "AMD Ryzen 7 5700G with Radeon Graphics",
+                    "ImageURL": "images_icon/cpu.png",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                {"Text": "Core (Tctl/Tdie)", "Value": "49.0 °C"},
+                                {"Text": "CPU Core #1", "Value": "44.5 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        // Must recognize CPU despite "with Radeon Graphics" in name
+        assert_eq!(parse_lhm_json(&json_tree), Some(49.0));
+    }
+
+    #[test]
+    fn test_parse_lhm_json_computer_name_ryzen_veto_gpu() {
+        let json_tree = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "RYZEN-DESKTOP",
+                    "ImageURL": "images_icon/computer.png",
+                    "Children": [
+                        {
+                            "Text": "AMD Radeon RX 7800 XT",
+                            "ImageURL": "images_icon/ati.png",
+                            "Children": [
+                                {
+                                    "Text": "Temperatures",
+                                    "Children": [
+                                        {"Text": "GPU Core", "Value": "48.0 °C"}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        // Even though computer name contains 'RYZEN', GPU sensors must be vetoed and not returned as CPU
+        assert_eq!(parse_lhm_json(&json_tree), None);
+    }
+
+    #[test]
+    fn test_parse_lhm_json_budget_and_legacy_cpus() {
+        let json_celeron = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "Intel Celeron G5905",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                {"Text": "CPU Package", "Value": "38.5 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+        assert_eq!(parse_lhm_json(&json_celeron), Some(38.5));
+
+        let json_athlon = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "AMD Athlon 3000G with Radeon Vega Graphics",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                {"Text": "Core (Tctl/Tdie)", "Value": "41.2 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+        assert_eq!(parse_lhm_json(&json_athlon), Some(41.2));
+
+        let json_ssd = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "Intel SSD 660p 1TB",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                {"Text": "Temperature", "Value": "33.0 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+        // Intel SSD must not be parsed as CPU
+        assert_eq!(parse_lhm_json(&json_ssd), None);
+    }
+
+    #[test]
+    fn test_parse_lhm_json_scoring_and_arc_filter() {
+        let json_tree = serde_json::json!({
+            "Text": "Sensor",
+            "Children": [
+                {
+                    "Text": "Intel Arc A770",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                {"Text": "GPU Core", "Value": "60.0 °C"}
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "Text": "Intel Core i9-13900K",
+                    "Children": [
+                        {
+                            "Text": "Temperatures",
+                            "Children": [
+                                {"Text": "CPU Core #1 Distance to TjMax", "Value": "65.0 °C"},
+                                {"Text": "CPU Core #1", "Value": "48.0 °C"},
+                                {"Text": "CPU Package", "Value": "54.5 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        // "CPU Package" (score 3) should beat "CPU Core #1" (score 1) and ignore Distance to TjMax and Intel Arc
+        assert_eq!(parse_lhm_json(&json_tree), Some(54.5));
+    }
+
+    #[test]
+    fn test_parse_lhm_json_comma_and_no_cpu() {
+        let json_comma = serde_json::json!({
+            "id": 0, "Text": "Sensor",
+            "Children": [
+                {
+                    "id": 1, "Text": "Intel Core i7-13700K",
+                    "Children": [
+                        {
+                            "id": 2, "Text": "Temperatures",
+                            "Children": [
+                                {"id": 3, "Text": "CPU Package", "Value": "52,3 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+        assert_eq!(parse_lhm_json(&json_comma), Some(52.3));
+
+        let json_gpu_only = serde_json::json!({
+            "id": 0, "Text": "Sensor",
+            "Children": [
+                {
+                    "id": 1, "Text": "NVIDIA GeForce RTX 4070",
+                    "Children": [
+                        {
+                            "id": 2, "Text": "Temperatures",
+                            "Children": [
+                                {"id": 3, "Text": "GPU Core", "Value": "55.0 °C"}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+        assert_eq!(parse_lhm_json(&json_gpu_only), None);
     }
 }

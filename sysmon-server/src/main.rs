@@ -18,6 +18,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 fn default_web_port() -> u16 { 7342 }
 fn default_stream_port() -> u16 { 7340 }
 fn default_controller_port() -> u16 { 7339 }
+fn default_lhm_port() -> u16 { 8085 }
 
 fn default_macros() -> Vec<crate::sys::MacroDef> {
     vec![
@@ -73,6 +74,8 @@ pub struct AppConfig {
     pub stream_port: u16,
     #[serde(default = "default_controller_port")]
     pub controller_port: u16,
+    #[serde(default = "default_lhm_port")]
+    pub lhm_port: u16,
     #[serde(default)]
     pub sort_by_ram: bool,
 }
@@ -84,6 +87,7 @@ impl Default for AppConfig {
             port: 7341,
             stream_port: 7340,
             controller_port: 7339,
+            lhm_port: 8085,
             update_interval_ms: 1500,
             web_port: 7342,
             sort_by_ram: false,
