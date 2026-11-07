@@ -82,6 +82,32 @@ The top screen presents an overview of host PC hardware status organized into fo
 
 ---
 
+## Hardware Telemetry & Architecture
+
+SysMon follows a **driverless architecture** for host security and stability (no unsigned kernel drivers or Ring-0 kernel modules):
+
+### Linux
+- **CPU & Motherboard**: Queried directly through `/sys/class/hwmon` and standard kernel interfaces.
+- **GPU**: Native NVIDIA (`nvidia-smi`), AMD Radeon (`hwmon` / `drm`), and Intel Arc metrics.
+- **Virtual Gamepad**: Handled via native kernel `/dev/uinput`.
+
+### Windows
+- **GPU Telemetry**:
+  - **NVIDIA**: Automatic `nvidia-smi` query (temperature, fan RPM, GPU model name).
+  - **AMD Radeon**: Native AMD Display Library (ADL) integration supporting Overdrive 5/6 and modern Performance Monitoring Logging (PMLog) for RDNA 1, 2, and 3 architectures (e.g. RX 6000 and RX 7000 series).
+  - **Intel Arc / DXGI**: Primary display adapter detection via DXGI.
+- **CPU Telemetry (Non-Invasive)**:
+  - Windows does not expose direct desktop CPU temperatures to user-space without kernel drivers, and many desktop motherboard BIOSes do not expose ACPI ThermalZone entries.
+  - To remain non-invasive and driverless, SysMon integrates with **LibreHardwareMonitor**:
+    1. Run [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) as Administrator.
+    2. Enable **Options -> Remote Web Server -> Run** (port `8085` by default).
+    3. SysMon connects to `http://127.0.0.1:8085/data.json` and extracts scored CPU package/core temperatures automatically (supports both Celsius and Fahrenheit).
+    4. The bridge port can be customized in SysMon Web Config (`http://127.0.0.1:7342/config`).
+  - If no thermal sensor is detected, the HUD displays `N/A` instead of a misleading zero.
+- **Virtual Gamepad**: Low-latency Xbox 360 controller emulation via [ViGEmBus](https://github.com/nefarius/ViGEmBus).
+
+---
+
 ## Network & Firewall Configuration
 
 SysMon uses the following ports:
@@ -92,6 +118,7 @@ SysMon uses the following ports:
 | **`7342`** | TCP / HTTP | Web Config (`/config`) & Mobile Telemetry (`/`) | **Required** |
 | **`7339`** | UDP | Virtual Gamepad Controller Input | **Required for `CTRL` Tab** |
 | **`7340`** | TCP / UDP | Screen Streaming Video Feed | *Optional (CAM build only)* |
+| **`8085`** | TCP / HTTP | LibreHardwareMonitor Web Server Bridge | *Optional (Windows only, localhost)* |
 
 ### Open Ports in Firewall
 
@@ -152,7 +179,22 @@ sudo rpm -i target/generate-rpm/sysmon-server-cam-*.rpm
 
 ---
 
-### 2. Virtual Gamepad Setup (`/dev/uinput`)
+### 2. Windows Host Server (`sysmon-server`)
+
+#### Option A: Pre-built Binary (Recommended)
+1. Download `sysmon-server-windows-x86_64.zip` from [GitHub Releases](https://github.com/Just-a-Spider/SysMon/releases).
+2. Extract the archive and run `sysmon-server.exe` (run as Administrator).
+3. To use the Virtual Gamepad (`CTRL` tab), install the [ViGEmBus driver](https://github.com/nefarius/ViGEmBus/releases).
+
+#### Option B: Compile from Source
+```powershell
+cd sysmon-server
+cargo build --release
+```
+
+---
+
+### 3. Linux Virtual Gamepad Setup (`/dev/uinput`)
 
 To use the 3DS as a PC controller without running the server as `root`, grant non-root permissions to `/dev/uinput` using the included udev rule:
 
@@ -165,7 +207,7 @@ sudo usermod -aG input $USER
 
 ---
 
-### 3. Nintendo 3DS Client (`sysmon-3ds`)
+### 4. Nintendo 3DS Client (`sysmon-3ds`)
 
 Requires `devkitARM` and `libctru` installed in your environment (e.g. `/opt/devkitpro`).
 
