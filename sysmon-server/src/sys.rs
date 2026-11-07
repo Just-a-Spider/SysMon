@@ -57,7 +57,9 @@ impl SysPoller {
         
         let components = Components::new_with_refreshed_list();
         
+        #[allow(unused_mut)]
         let mut cpu_fan_path = None;
+        #[allow(unused_mut)]
         let mut gpu_fan_path = None;
         
         #[cfg(target_os = "linux")]
@@ -85,6 +87,8 @@ impl SysPoller {
                 }
             }
         }
+
+        crate::logging::log_system_diagnostics(&sys, &components);
 
         Self { 
             sys, 
@@ -131,29 +135,78 @@ impl SysPoller {
             }
         }
 
+        let amd_data = crate::amd_adl::get_amd_gpu_data();
+
+        #[cfg(target_os = "windows")]
+        if cpu_temp == 0.0 {
+            // 1. Try LibreHardwareMonitor Web Server bridge FIRST (http://127.0.0.1:<lhm_port>/data.json)
+            if let Some(lhm_temp) = crate::win_hw::get_lhm_http_cpu_temp() {
+                cpu_temp = lhm_temp;
+            }
+
+            // 2. Try WMI bridge (LibreHardwareMonitor / OpenHardwareMonitor)
+            if cpu_temp == 0.0 {
+                if let Some(wmi_temp) = crate::win_hw::get_wmi_cpu_temp() {
+                    cpu_temp = wmi_temp;
+                }
+            }
+
+            // 3. Try AMD ADL PMLog sensor 32
+            if cpu_temp == 0.0 {
+                if let Some(amd_cpu) = amd_data.as_ref().and_then(|d| d.cpu_temp) {
+                    cpu_temp = amd_cpu;
+                }
+            }
+
+            // 4. Fall back to ACPI thermal zone only if all above returned nothing
+            if cpu_temp == 0.0 {
+                let mut best_tz = 0.0f32;
+                for component in self.components.list() {
+                    let label = component.label().to_lowercase();
+                    if label.contains("thermalzone") {
+                        let temp = component.temperature().unwrap_or(0.0);
+                        if temp > 0.0 && temp < 115.0 {
+                            best_tz = best_tz.max(temp);
+                        }
+                    }
+                }
+                if best_tz > 0.0 {
+                    cpu_temp = best_tz;
+                }
+            }
+        }
+
+        #[allow(unused_mut)]
+        let mut cpu_fan = 0;
+        let mut gpu_fan = 0;
+
         let (gpu_name, gpu_temp) = if let Some((name, temp)) = get_dedicated_gpu_data() {
             (name, temp)
+        } else if let Some(ref amd) = amd_data {
+            if amd.fan_rpm > 0 {
+                gpu_fan = amd.fan_rpm;
+            }
+            (amd.name.clone(), amd.temp)
         } else {
             let mut fallback_temp = 0.0;
-            let mut fallback_name = "GPU".to_string();
+            let mut fallback_name = crate::win_hw::get_dxgi_gpu_name().unwrap_or_else(|| "GPU".to_string());
             for component in self.components.list() {
                 let label = component.label().to_lowercase();
                 if label.contains("gpu") || label.contains("edge") || label.contains("junction") || label.contains("amdgpu") {
                     if fallback_temp == 0.0 {
                         fallback_temp = component.temperature().unwrap_or(0.0);
-                        if label.contains("amd") || label.contains("edge") {
-                            fallback_name = "Radeon".to_string();
-                        } else if label.contains("intel") {
-                            fallback_name = "Intel".to_string();
+                        if fallback_name == "GPU" {
+                            if label.contains("amd") || label.contains("edge") {
+                                fallback_name = "Radeon".to_string();
+                            } else if label.contains("intel") {
+                                fallback_name = "Intel".to_string();
+                            }
                         }
                     }
                 }
             }
             (fallback_name, fallback_temp)
         };
-
-        let mut cpu_fan = 0;
-        let mut gpu_fan = 0;
         
         #[cfg(target_os = "linux")]
         {

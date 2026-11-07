@@ -18,14 +18,15 @@ pub async fn run_web_server(state: Arc<Mutex<AppState>>, port: u16) {
         .route("/api/stream/picker", get(trigger_screencast_picker).post(trigger_screencast_picker))
         .route("/api/stream/toggle", get(toggle_stream).post(toggle_stream))
         .route("/api/stream/status", get(get_stream_status))
+        .route("/api/logs", get(get_logs))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
     if let Ok(listener) = tokio::net::TcpListener::bind(&addr).await {
-        println!("Web config dashboard listening on {}", addr);
+        tracing::info!("Web config dashboard listening on {}", addr);
         let _ = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await;
     } else {
-        eprintln!("Failed to bind web config to {}", addr);
+        tracing::error!("Failed to bind web config to {}", addr);
     }
 }
 
@@ -47,8 +48,11 @@ async fn get_config(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): St
     Ok(Json(s.config.clone()))
 }
 
-async fn update_config(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): State<Arc<Mutex<AppState>>>, Json(payload): Json<crate::AppConfig>) -> Result<Json<bool>, StatusCode> {
+async fn update_config(ConnectInfo(addr): ConnectInfo<SocketAddr>, State(state): State<Arc<Mutex<AppState>>>, Json(mut payload): Json<crate::AppConfig>) -> Result<Json<bool>, StatusCode> {
     if !addr.ip().is_loopback() { return Err(StatusCode::FORBIDDEN); }
+    if payload.lhm_port == 0 {
+        payload.lhm_port = 8085;
+    }
     let mut s = state.lock().await;
     s.config = payload;
     s.should_restart_server = true;
@@ -110,4 +114,18 @@ async fn get_stream_status(State(state): State<Arc<Mutex<AppState>>>) -> Json<cr
         mode: st.mode.load(std::sync::atomic::Ordering::SeqCst),
         zoom: st.zoom.load(std::sync::atomic::Ordering::SeqCst),
     })
+}
+
+async fn get_logs(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<(axum::http::HeaderMap, String), StatusCode> {
+    if !addr.ip().is_loopback() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let log_path = crate::get_config_dir().join("sysmon.log");
+    let content = std::fs::read_to_string(&log_path).unwrap_or_else(|_| "No logs recorded yet.\n".to_string());
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        "text/plain; charset=utf-8".parse().unwrap(),
+    );
+    Ok((headers, content))
 }

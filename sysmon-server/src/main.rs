@@ -3,6 +3,9 @@ mod streamer;
 mod sys;
 mod web_api;
 mod controller;
+mod logging;
+mod amd_adl;
+mod win_hw;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,6 +18,7 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 fn default_web_port() -> u16 { 7342 }
 fn default_stream_port() -> u16 { 7340 }
 fn default_controller_port() -> u16 { 7339 }
+fn default_lhm_port() -> u16 { 8085 }
 
 fn default_macros() -> Vec<crate::sys::MacroDef> {
     vec![
@@ -70,6 +74,8 @@ pub struct AppConfig {
     pub stream_port: u16,
     #[serde(default = "default_controller_port")]
     pub controller_port: u16,
+    #[serde(default = "default_lhm_port")]
+    pub lhm_port: u16,
     #[serde(default)]
     pub sort_by_ram: bool,
 }
@@ -81,6 +87,7 @@ impl Default for AppConfig {
             port: 7341,
             stream_port: 7340,
             controller_port: 7339,
+            lhm_port: 8085,
             update_interval_ms: 1500,
             web_port: 7342,
             sort_by_ram: false,
@@ -132,6 +139,11 @@ fn create_tray_icon() -> Icon {
 }
 
 fn main() {
+    let config_dir = get_config_dir();
+    let _log_guard = logging::init_logging(&config_dir);
+    tracing::info!("SysMon Server v{} initializing...", env!("CARGO_PKG_VERSION"));
+    tracing::info!("Configuration & log directory: {:?}", config_dir);
+
     #[cfg(target_os = "linux")]
     {
         // On Wayland compositors (COSMIC, GNOME, KDE), libayatana-appindicator / GtkStatusIcon
@@ -139,11 +151,11 @@ fn main() {
         // and avoid Gtk-CRITICAL scale factor assertion failures.
         gtk::gdk::set_allowed_backends("x11");
         if let Err(e) = gtk::init() {
-            eprintln!("Failed to initialize GTK: {}", e);
+            tracing::error!("Failed to initialize GTK: {}", e);
         }
     }
 
-    let config_path = get_config_dir().join("config.json");
+    let config_path = config_dir.join("config.json");
     let mut config = AppConfig::default();
     if let Ok(content) = std::fs::read_to_string(config_path) {
         if let Ok(parsed) = serde_json::from_str::<AppConfig>(&content) {
@@ -192,7 +204,7 @@ fn main() {
             // Listen for SIGINT / Ctrl+C in terminal console
             tokio::spawn(async {
                 if let Ok(()) = tokio::signal::ctrl_c().await {
-                    println!("\nShutting down SysMon Server...");
+                    tracing::info!("Shutting down SysMon Server...");
                     std::process::exit(0);
                 }
             });
@@ -273,21 +285,22 @@ fn main() {
 
     let tray_menu = Menu::new();
     #[cfg(feature = "cam")]
-    let status_i = MenuItem::new("○ Stream: STANDBY", false, None);
+    let status_i = MenuItem::new("Stream: STANDBY", false, None);
     #[cfg(feature = "cam")]
-    let source_i = MenuItem::new("📺 Source: None Selected", false, None);
+    let source_i = MenuItem::new("Source: None Selected", false, None);
     #[cfg(feature = "cam")]
-    let pick_os_i = MenuItem::new("🖥️ Choose Window / Screen (OS Dialog)...", true, None);
+    let pick_os_i = MenuItem::new("Choose Window / Screen (OS Dialog)...", true, None);
     #[cfg(feature = "cam")]
-    let toggle_stream_i = MenuItem::new("▶️ Start Screen Sharing", true, None);
+    let toggle_stream_i = MenuItem::new("Start Screen Sharing", true, None);
     #[cfg(feature = "cam")]
-    let zoom_i = MenuItem::new("🔍 Zoom: FIT (Triangle)", true, None);
+    let zoom_i = MenuItem::new("Zoom: FIT (Triangle)", true, None);
     #[cfg(feature = "cam")]
     let next_src_i = MenuItem::new("Stream: Next Monitor", true, None);
     #[cfg(feature = "cam")]
     let prev_src_i = MenuItem::new("Stream: Prev Monitor", true, None);
 
     let web_i = MenuItem::new("Open Web Config", true, None);
+    let logs_i = MenuItem::new("Open Log File", true, None);
     let start_i = MenuItem::new("Start Server", true, None);
     let stop_i = MenuItem::new("Stop Server", true, None);
     let quit_i = MenuItem::new("Quit", true, None);
@@ -306,6 +319,7 @@ fn main() {
     }
 
     let _ = tray_menu.append(&web_i);
+    let _ = tray_menu.append(&logs_i);
     let _ = tray_menu.append(&start_i);
     let _ = tray_menu.append(&stop_i);
     let _ = tray_menu.append(&PredefinedMenuItem::separator());
@@ -339,26 +353,26 @@ fn main() {
             let src_name = tray_streamer.active_source_name.lock().map(|s| s.clone()).unwrap_or_else(|_| "Standby".to_string());
 
             let status_txt = if is_sharing && is_active {
-                "● Stream: ACTIVE (Sending to 3DS)"
+                "[ACTIVE] Stream: Sending to 3DS"
             } else if is_sharing {
-                "○ Stream: READY (Waiting for 3DS)"
+                "[READY] Stream: Waiting for 3DS"
             } else {
-                "⏸ Stream: PAUSED (Standby)"
+                "[PAUSED] Stream: Standby"
             };
 
             let toggle_txt = if is_sharing {
-                "⏸️ Pause Screen Sharing"
+                "Pause Screen Sharing"
             } else {
-                "▶️ Start Screen Sharing"
+                "Start Screen Sharing"
             };
 
             let zoom_txt = if zoom == 1 {
-                "🔍 Zoom: 1:1 PIXEL CROP"
+                "Zoom: 1:1 PIXEL CROP"
             } else {
-                "🔍 Zoom: FIT (Triangle)"
+                "Zoom: FIT (Triangle)"
             };
 
-            let source_txt = format!("📺 Source: {}", src_name);
+            let source_txt = format!("Source: {}", src_name);
 
             status_i.set_text(status_txt);
             source_i.set_text(source_txt);
@@ -373,6 +387,9 @@ fn main() {
             } else if event.id == web_i.id() {
                 let web_port = state.blocking_lock().config.web_port;
                 let _ = open::that(format!("http://127.0.0.1:{}/config", web_port));
+            } else if event.id == logs_i.id() {
+                let log_path = get_config_dir().join("sysmon.log");
+                let _ = open::that(log_path);
             } else if event.id == start_i.id() {
                 state.blocking_lock().is_server_running = true;
             } else if event.id == stop_i.id() {
